@@ -363,6 +363,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data.clear()
 
 if __name__ == '__main__':
+    # Jalankan inisialisasi database sebelum bot berjalan
+    try:
+        from db_init import init_db
+        print("Mulai inisialisasi database...")
+        init_db()
+    except Exception as e:
+        logger.error(f"Gagal melakukan inisialisasi database: {e}")
+
     # Membangun aplikasi bot
     app = ApplicationBuilder().token(TOKEN).build()
 

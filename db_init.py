@@ -38,6 +38,20 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
+    # Check if table already has data
+    try:
+        cursor.execute("SELECT COUNT(*) AS total FROM customers")
+        row = cursor.fetchone()
+        if row:
+            count = row['total'] if isinstance(row, dict) else row[0]
+            if count > 0:
+                print(f"Database already initialized. Found {count} customers. Skipping import.")
+                conn.close()
+                return
+    except Exception:
+        # Table might not exist yet, proceed to create it
+        pass
+    
     # Create table (compatible syntax for both MySQL and SQLite)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS customers (
