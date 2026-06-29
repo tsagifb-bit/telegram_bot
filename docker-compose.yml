@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: botsite-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: botsite
+      MYSQL_USER: botuser
+      MYSQL_PASSWORD: botpassword
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    # Healthcheck to make sure MySQL is ready before bot starts
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "botuser", "-pbotpassword"]
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  bot:
+    build: .
+    container_name: botsite-bot
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - DB_TYPE=mysql
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_USER=botuser
+      - DB_PASSWORD=botpassword
+      - DB_DATABASE=botsite
+      - TELEGRAM_BOT_TOKEN=8680524895:AAHVUJfnecsJkCUeHd2V8HrSIZYv1BKLNCw
+    command: sh -c "python db_init.py && python botSite.py"
+
+volumes:
+  mysql_data:
