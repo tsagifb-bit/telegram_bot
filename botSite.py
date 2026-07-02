@@ -70,6 +70,36 @@ def get_unique_branches():
 def get_unique_clusters():
     return get_unique_column_values('Cluster')
 
+def get_unique_clusters_by_branch(branch_name):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT DISTINCT Cluster FROM customers WHERE Branch = {PLACEHOLDER} AND Cluster IS NOT NULL AND Cluster != '' ORDER BY Cluster",
+            (branch_name,)
+        )
+        values = [row['Cluster'] for row in cursor.fetchall()]
+        conn.close()
+        return values
+    except Exception as e:
+        logger.error(f"Error reading clusters for branch {branch_name}: {e}")
+        return []
+
+def get_site_ids_by_branch_and_cluster(branch_name, cluster_name):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT DISTINCT Nearest_Site_ID FROM customers WHERE Branch = {PLACEHOLDER} AND Cluster = {PLACEHOLDER} AND Nearest_Site_ID IS NOT NULL AND Nearest_Site_ID != '' ORDER BY Nearest_Site_ID",
+            (branch_name, cluster_name)
+        )
+        site_ids = [row['Nearest_Site_ID'] for row in cursor.fetchall()]
+        conn.close()
+        return site_ids
+    except Exception as e:
+        logger.error(f"Error reading sites by branch {branch_name} and cluster {cluster_name}: {e}")
+        return []
+
 def get_site_ids_by_filter(filter_col, filter_val):
     try:
         conn = get_db_connection()
@@ -137,11 +167,12 @@ def create_grid_keyboard(items, callback_prefix, cols=2, back_callback="menu:mai
     for i in range(0, len(items), cols):
         row = [InlineKeyboardButton(item, callback_data=f"{callback_prefix}:{item}") for item in items[i:i+cols]]
         keyboard.append(row)
-    keyboard.append([InlineKeyboardButton("⬅️ Kembali", callback_data=back_callback)])
+    if back_callback:
+        keyboard.append([InlineKeyboardButton("⬅️ Kembali", callback_data=back_callback)])
     return InlineKeyboardMarkup(keyboard)
 
 def branch_keyboard():
-    return create_grid_keyboard(get_unique_branches(), "branch")
+    return create_grid_keyboard(get_unique_branches(), "branch", back_callback=None)
 
 def cluster_keyboard():
     return create_grid_keyboard(get_unique_clusters(), "cluster")
@@ -211,8 +242,8 @@ async def show_customer_new_message(chat_id, context: ContextTypes.DEFAULT_TYPE)
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text(
-        "Silakan pilih pencarian data berdasarkan:",
-        reply_markup=main_menu_keyboard()
+        "Pilih Branch:",
+        reply_markup=branch_keyboard()
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -269,47 +300,73 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
 
-    if data == "menu:main":
+    if data == "menu:main" or data == "menu:branch":
         context.user_data.clear()
-        await query.edit_message_text(
-            "Silakan pilih pencarian data berdasarkan:",
-            reply_markup=main_menu_keyboard()
-        )
-    elif data == "menu:branch":
         await query.edit_message_text("Pilih Branch:", reply_markup=branch_keyboard())
     elif data == "menu:cluster":
-        await query.edit_message_text("Pilih Cluster:", reply_markup=cluster_keyboard())
+        branch_name = context.user_data.get('selected_branch')
+        if not branch_name:
+            await query.edit_message_text("Pilih Branch:", reply_markup=branch_keyboard())
+            return
+        context.user_data.pop('selected_cluster', None)
+        clusters = get_unique_clusters_by_branch(branch_name)
+        await query.edit_message_text(
+            f"Pilih Cluster di Branch {branch_name}:",
+            reply_markup=create_grid_keyboard(clusters, "cluster", back_callback="menu:branch")
+        )
     elif data == "menu:site":
         context.user_data['state'] = 'waiting_for_site_id'
         await query.edit_message_text("Silakan ketik SITE ID yang ingin Anda cari (Contoh: SLT077):")
         
     elif data.startswith("branch:"):
         branch_name = data.split(":", 1)[1]
-        sites = get_site_ids_by_branch(branch_name)
-        if not sites:
-            await query.edit_message_text(f"Tidak ada SITE ID di branch {branch_name}.", reply_markup=branch_keyboard())
+        context.user_data['selected_branch'] = branch_name
+        clusters = get_unique_clusters_by_branch(branch_name)
+        if not clusters:
+            await query.edit_message_text(f"Tidak ada Cluster di branch {branch_name}.", reply_markup=branch_keyboard())
         else:
             await query.edit_message_text(
-                f"Pilih SITE ID di Branch {branch_name}:",
-                reply_markup=sites_keyboard(sites, "menu:branch")
+                f"Pilih Cluster di Branch {branch_name}:",
+                reply_markup=create_grid_keyboard(clusters, "cluster", back_callback="menu:branch")
             )
             
     elif data.startswith("cluster:"):
         cluster_name = data.split(":", 1)[1]
-        sites = get_site_ids_by_cluster(cluster_name)
+        branch_name = context.user_data.get('selected_branch')
+        if not branch_name:
+            await query.edit_message_text("Pilih Branch:", reply_markup=branch_keyboard())
+            return
+        
+        context.user_data['selected_cluster'] = cluster_name
+        sites = get_site_ids_by_branch_and_cluster(branch_name, cluster_name)
         if not sites:
-            await query.edit_message_text(f"Tidak ada SITE ID di cluster {cluster_name}.", reply_markup=cluster_keyboard())
+            await query.edit_message_text(
+                f"Tidak ada SITE ID di cluster {cluster_name} (Branch {branch_name}).",
+                reply_markup=create_grid_keyboard(
+                    get_unique_clusters_by_branch(branch_name),
+                    "cluster",
+                    back_callback="menu:branch"
+                )
+            )
         else:
             await query.edit_message_text(
-                f"Pilih SITE ID di Cluster {cluster_name}:",
-                reply_markup=sites_keyboard(sites, "menu:cluster")
+                f"Pilih SITE ID di Cluster {cluster_name} (Branch {branch_name}):",
+                reply_markup=sites_keyboard(sites, back_callback="menu:cluster")
             )
             
     elif data.startswith("site_id:"):
         site_id = data.split(":", 1)[1]
         customers = get_customers_by_site_id(site_id)
         if not customers:
-            await query.edit_message_text(f"Tidak ada data pelanggan yang belum disetujui (Y) untuk SITE ID {site_id}.")
+            branch_name = context.user_data.get('selected_branch')
+            cluster_name = context.user_data.get('selected_cluster')
+            sites = get_site_ids_by_branch_and_cluster(branch_name, cluster_name) if (branch_name and cluster_name) else []
+            keyboard = sites_keyboard(sites, back_callback="menu:cluster") if sites else create_grid_keyboard([], "", back_callback="menu:cluster")
+            
+            await query.edit_message_text(
+                f"Tidak ada data pelanggan yang belum disetujui (Y) untuk SITE ID {site_id}.",
+                reply_markup=keyboard
+            )
         else:
             context.user_data['state'] = None
             context.user_data['search_results'] = customers
