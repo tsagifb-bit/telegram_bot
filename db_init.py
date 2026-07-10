@@ -4,9 +4,68 @@ import sqlite3
 import pymysql
 import time
 
+def get_mysql_config():
+    host = 'localhost'
+    port = 3306
+    user = 'botuser'
+    password = 'botpassword'
+    database = 'botsite'
+
+    # Try to parse from URL first (common on Railway)
+    url = os.environ.get('MYSQL_URL') or os.environ.get('DATABASE_URL')
+    if url and url.startswith('mysql://'):
+        try:
+            url_clean = url[8:]
+            if '@' in url_clean:
+                auth, rest = url_clean.split('@', 1)
+                if ':' in auth:
+                    user, password = auth.split(':', 1)
+                else:
+                    user = auth
+                
+                if '/' in rest:
+                    host_port, database = rest.split('/', 1)
+                else:
+                    host_port = rest
+                    database = 'botsite'
+                
+                if '?' in database:
+                    database = database.split('?', 1)[0]
+                
+                if ':' in host_port:
+                    host, port_str = host_port.split(':', 1)
+                    port = int(port_str)
+                else:
+                    host = host_port
+                    port = 3306
+        except Exception as e:
+            print(f"Failed to parse connection URL: {e}", flush=True)
+
+    # Allow overlay with individual environment variables
+    host = os.environ.get('DB_HOST') or os.environ.get('MYSQLHOST') or os.environ.get('MYSQL_HOST') or host
+    port_val = os.environ.get('DB_PORT') or os.environ.get('MYSQLPORT') or os.environ.get('MYSQL_PORT')
+    if port_val:
+        try:
+            port = int(port_val)
+        except ValueError:
+            pass
+    user = os.environ.get('DB_USER') or os.environ.get('MYSQLUSER') or os.environ.get('MYSQL_USER') or user
+    password = os.environ.get('DB_PASSWORD') or os.environ.get('MYSQLPASSWORD') or os.environ.get('MYSQL_PASSWORD') or password
+    database = os.environ.get('DB_DATABASE') or os.environ.get('MYSQLDATABASE') or os.environ.get('MYSQL_DATABASE') or os.environ.get('MYSQL_DB') or database
+
+    return host, port, user, password, database
+
+# DB Type detection
 DB_TYPE = os.environ.get('DB_TYPE')
 if not DB_TYPE:
-    if os.environ.get('MYSQLHOST') or os.environ.get('DB_HOST') not in (None, 'localhost', '127.0.0.1'):
+    url = os.environ.get('MYSQL_URL') or os.environ.get('DATABASE_URL')
+    is_mysql_url = url and url.startswith('mysql://')
+    has_mysql_env = (
+        os.environ.get('MYSQLHOST') or 
+        os.environ.get('MYSQL_HOST') or 
+        os.environ.get('DB_HOST') not in (None, 'localhost', '127.0.0.1')
+    )
+    if is_mysql_url or has_mysql_env:
         DB_TYPE = 'mysql'
     else:
         DB_TYPE = 'sqlite'
@@ -17,11 +76,8 @@ PLACEHOLDER = '%s' if DB_TYPE == 'mysql' else '?'
 
 def get_db_connection():
     if DB_TYPE == 'mysql':
-        host = os.environ.get('DB_HOST') or os.environ.get('MYSQLHOST') or 'localhost'
-        port = int(os.environ.get('DB_PORT') or os.environ.get('MYSQLPORT') or 3306)
-        user = os.environ.get('DB_USER') or os.environ.get('MYSQLUSER') or 'botuser'
-        password = os.environ.get('DB_PASSWORD') or os.environ.get('MYSQLPASSWORD') or 'botpassword'
-        database = os.environ.get('DB_DATABASE') or os.environ.get('MYSQLDATABASE') or 'botsite'
+        host, port, user, password, database = get_mysql_config()
+        print(f"Connecting to MySQL with: host={host}, port={port}, user={user}, database={database}", flush=True)
         
         last_error = None
         # Retry logic for MySQL connection (essential for container startup)
