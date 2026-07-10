@@ -4,17 +4,26 @@ import sqlite3
 import pymysql
 import time
 
-DB_TYPE = os.environ.get('DB_TYPE', 'sqlite').lower()
+DB_TYPE = os.environ.get('DB_TYPE')
+if not DB_TYPE:
+    if os.environ.get('MYSQLHOST') or os.environ.get('DB_HOST') not in (None, 'localhost', '127.0.0.1'):
+        DB_TYPE = 'mysql'
+    else:
+        DB_TYPE = 'sqlite'
+else:
+    DB_TYPE = DB_TYPE.lower()
+
 PLACEHOLDER = '%s' if DB_TYPE == 'mysql' else '?'
 
 def get_db_connection():
     if DB_TYPE == 'mysql':
-        host = os.environ.get('DB_HOST', 'localhost')
-        port = int(os.environ.get('DB_PORT', 3306))
-        user = os.environ.get('DB_USER', 'botuser')
-        password = os.environ.get('DB_PASSWORD', 'botpassword')
-        database = os.environ.get('DB_DATABASE', 'botsite')
+        host = os.environ.get('DB_HOST') or os.environ.get('MYSQLHOST') or 'localhost'
+        port = int(os.environ.get('DB_PORT') or os.environ.get('MYSQLPORT') or 3306)
+        user = os.environ.get('DB_USER') or os.environ.get('MYSQLUSER') or 'botuser'
+        password = os.environ.get('DB_PASSWORD') or os.environ.get('MYSQLPASSWORD') or 'botpassword'
+        database = os.environ.get('DB_DATABASE') or os.environ.get('MYSQLDATABASE') or 'botsite'
         
+        last_error = None
         # Retry logic for MySQL connection (essential for container startup)
         for i in range(15):
             try:
@@ -28,9 +37,10 @@ def get_db_connection():
                 )
                 return conn
             except Exception as e:
-                print(f"Connecting to MySQL failed (attempt {i+1}/15): {e}")
+                last_error = e
+                print(f"Connecting to MySQL failed (attempt {i+1}/15): {e}", flush=True)
                 time.sleep(3)
-        raise Exception("Could not connect to MySQL server")
+        raise Exception("Could not connect to MySQL server") from last_error
     else:
         return sqlite3.connect('database.db')
 

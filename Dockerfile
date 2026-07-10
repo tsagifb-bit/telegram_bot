@@ -1,6 +1,10 @@
 # Gunakan image resmi Python yang ringan (slim)
 FROM python:3.11-slim
 
+# Prevent Python from writing .pyc files and buffer stdout/stderr
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
 # Tentukan working directory di dalam container
 WORKDIR /app
 
