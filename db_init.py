@@ -4,6 +4,11 @@ import sqlite3
 import pymysql
 import time
 
+def clean_val(val):
+    if not val:
+        return val
+    return val.strip().strip('"').strip("'").strip()
+
 def get_mysql_config():
     host = 'mysql.railway.internal'
     port = 3306
@@ -11,9 +16,9 @@ def get_mysql_config():
     password = 'botpassword'
     database = 'railway'
 
+    # Try to parse from URL first (common on Railway)
     url = os.environ.get('MYSQL_URL') or os.environ.get('MYSQLURL') or os.environ.get('DATABASE_URL')
-    if url:
-        url = url.strip()
+    url = clean_val(url)
     if url and url.lower().startswith('mysql://'):
         try:
             url_clean = url[8:]
@@ -39,20 +44,37 @@ def get_mysql_config():
                 else:
                     host = host_port
                     port = 3306
+                
+                host = clean_val(host)
+                user = clean_val(user)
+                password = clean_val(password)
+                database = clean_val(database)
         except Exception as e:
             print(f"Failed to parse connection URL: {e}", flush=True)
 
     # Allow overlay with individual environment variables
-    host = os.environ.get('DB_HOST') or os.environ.get('MYSQLHOST') or os.environ.get('MYSQL_HOST') or host
-    port_val = os.environ.get('DB_PORT') or os.environ.get('MYSQLPORT') or os.environ.get('MYSQL_PORT')
+    env_host = clean_val(os.environ.get('DB_HOST') or os.environ.get('MYSQLHOST') or os.environ.get('MYSQL_HOST'))
+    if env_host:
+        host = env_host
+
+    port_val = clean_val(os.environ.get('DB_PORT') or os.environ.get('MYSQLPORT') or os.environ.get('MYSQL_PORT'))
     if port_val:
         try:
             port = int(port_val)
         except ValueError:
             pass
-    user = os.environ.get('DB_USER') or os.environ.get('MYSQLUSER') or os.environ.get('MYSQL_USER') or user
-    password = os.environ.get('DB_PASSWORD') or os.environ.get('MYSQLPASSWORD') or os.environ.get('MYSQL_PASSWORD') or password
-    database = os.environ.get('DB_DATABASE') or os.environ.get('MYSQLDATABASE') or os.environ.get('MYSQL_DATABASE') or os.environ.get('MYSQL_DB') or database
+
+    env_user = clean_val(os.environ.get('DB_USER') or os.environ.get('MYSQLUSER') or os.environ.get('MYSQL_USER'))
+    if env_user:
+        user = env_user
+
+    env_password = clean_val(os.environ.get('DB_PASSWORD') or os.environ.get('MYSQLPASSWORD') or os.environ.get('MYSQL_PASSWORD'))
+    if env_password:
+        password = env_password
+
+    env_database = clean_val(os.environ.get('DB_DATABASE') or os.environ.get('MYSQLDATABASE') or os.environ.get('MYSQL_DATABASE') or os.environ.get('MYSQL_DB'))
+    if env_database:
+        database = env_database
 
     return host, port, user, password, database
 
