@@ -11,11 +11,10 @@ def get_mysql_config():
     password = 'botpassword'
     database = 'railway'
 
-    # Try to parse from URL first (common on Railway)
     url = os.environ.get('MYSQL_URL') or os.environ.get('MYSQLURL') or os.environ.get('DATABASE_URL')
     if url:
         url = url.strip()
-    if url and url.startswith('mysql://'):
+    if url and url.lower().startswith('mysql://'):
         try:
             url_clean = url[8:]
             if '@' in url_clean:
