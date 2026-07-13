@@ -5,14 +5,14 @@ import pymysql
 import time
 
 def get_mysql_config():
-    host = 'mysql-production-5a9b.up.railway.app'
+    host = 'mysql.railway.internal'
     port = 3306
     user = 'root'
     password = 'botpassword'
     database = 'railway'
 
     # Try to parse from URL first (common on Railway)
-    url = os.environ.get('MYSQL_URL') or os.environ.get('DATABASE_URL') or os.environ.get('RAILWAY_SERVICE_MYSQL_URL')
+    url = os.environ.get('MYSQL_URL') or os.environ.get('MYSQLURL') or os.environ.get('DATABASE_URL')
     if url:
         url = url.strip()
     if url and url.startswith('mysql://'):
@@ -44,14 +44,7 @@ def get_mysql_config():
             print(f"Failed to parse connection URL: {e}", flush=True)
 
     # Allow overlay with individual environment variables
-    env_host = os.environ.get('DB_HOST') or os.environ.get('MYSQLHOST') or os.environ.get('MYSQL_HOST')
-    if env_host:
-        host = env_host
-    elif host in ('localhost', 'mysql.railway.internal') and os.environ.get('RAILWAY_SERVICE_MYSQL_URL'):
-        r_url = os.environ.get('RAILWAY_SERVICE_MYSQL_URL').strip()
-        if r_url and not r_url.startswith('mysql://'):
-            host = r_url
-
+    host = os.environ.get('DB_HOST') or os.environ.get('MYSQLHOST') or os.environ.get('MYSQL_HOST') or host
     port_val = os.environ.get('DB_PORT') or os.environ.get('MYSQLPORT') or os.environ.get('MYSQL_PORT')
     if port_val:
         try:
