@@ -27,14 +27,16 @@ logger = logging.getLogger(__name__)
 # --- Database Helper Functions ---
 
 def get_mysql_config():
-    host = 'localhost'
+    host = 'mysql.railway.internal'
     port = 3306
-    user = 'botuser'
+    user = 'root'
     password = 'botpassword'
-    database = 'botsite'
+    database = 'railway'
 
     # Try to parse from URL first (common on Railway)
-    url = os.environ.get('MYSQL_URL') or os.environ.get('DATABASE_URL')
+    url = os.environ.get('MYSQL_URL') or os.environ.get('DATABASE_URL') or os.environ.get('RAILWAY_SERVICE_MYSQL_URL')
+    if url:
+        url = url.strip()
     if url and url.startswith('mysql://'):
         try:
             url_clean = url[8:]
@@ -64,7 +66,14 @@ def get_mysql_config():
             logger.error(f"Failed to parse connection URL: {e}")
 
     # Allow overlay with individual environment variables
-    host = os.environ.get('DB_HOST') or os.environ.get('MYSQLHOST') or os.environ.get('MYSQL_HOST') or host
+    env_host = os.environ.get('DB_HOST') or os.environ.get('MYSQLHOST') or os.environ.get('MYSQL_HOST')
+    if env_host:
+        host = env_host
+    elif host in ('localhost', 'mysql.railway.internal') and os.environ.get('RAILWAY_SERVICE_MYSQL_URL'):
+        r_url = os.environ.get('RAILWAY_SERVICE_MYSQL_URL').strip()
+        if r_url and not r_url.startswith('mysql://'):
+            host = r_url
+
     port_val = os.environ.get('DB_PORT') or os.environ.get('MYSQLPORT') or os.environ.get('MYSQL_PORT')
     if port_val:
         try:
@@ -80,11 +89,12 @@ def get_mysql_config():
 # DB Type detection
 DB_TYPE = os.environ.get('DB_TYPE')
 if not DB_TYPE:
-    url = os.environ.get('MYSQL_URL') or os.environ.get('DATABASE_URL')
+    url = os.environ.get('MYSQL_URL') or os.environ.get('DATABASE_URL') or os.environ.get('RAILWAY_SERVICE_MYSQL_URL')
     is_mysql_url = url and url.startswith('mysql://')
     has_mysql_env = (
         os.environ.get('MYSQLHOST') or 
         os.environ.get('MYSQL_HOST') or 
+        os.environ.get('RAILWAY_SERVICE_MYSQL_URL') or
         os.environ.get('DB_HOST') not in (None, 'localhost', '127.0.0.1')
     )
     if is_mysql_url or has_mysql_env:
