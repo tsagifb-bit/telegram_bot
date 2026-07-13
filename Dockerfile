@@ -17,5 +17,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Salin seluruh kode program dan file CSV/database ke dalam container
 COPY . .
 
-# Jalankan aplikasi botSite.py
-CMD ["python", "botSite.py"]
+# Jalankan inisialisasi database (import CSV) lalu jalankan aplikasi botSite.py
+CMD ["sh", "-c", "python db_init.py && python botSite.py"]
