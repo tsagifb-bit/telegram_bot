@@ -101,6 +101,14 @@ def get_db_connection():
         return sqlite3.connect('database.db')
 
 def init_db():
+    print("=== DUMPING ENVIRONMENT VARIABLES ===", flush=True)
+    for k, v in sorted(os.environ.items()):
+        if any(sec in k.upper() for sec in ['PASS', 'KEY', 'SECRET', 'TOKEN', 'AUTH']):
+            print(f"  {k} = [MASKED]", flush=True)
+        else:
+            print(f"  {k} = {v}", flush=True)
+    print("===================================", flush=True)
+
     conn = get_db_connection()
     cursor = conn.cursor()
     
