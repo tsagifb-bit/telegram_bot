@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # --- Database Helper Functions ---
 
 def get_mysql_config():
-    host = 'mysql.railway.internal'
+    host = 'mysql-production-5a9b.up.railway.app'
     port = 3306
     user = 'root'
     password = 'botpassword'
