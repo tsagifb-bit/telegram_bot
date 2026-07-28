@@ -335,6 +335,83 @@ def check_site_stats(site_id):
         }
 
 
+def get_potensi_branch_and_cluster(site_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT branch, cluster FROM potensi_site WHERE site_id = {PLACEHOLDER} AND branch IS NOT NULL AND branch != '' LIMIT 1",
+            (site_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            return row['branch'], row['cluster']
+    except Exception as e:
+        logger.error(f"Error getting branch/cluster for site {site_id} in potensi_site: {e}")
+    return '', ''
+
+def get_potensi_categories(branch, cluster, site_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT DISTINCT kategori FROM potensi_site "
+            f"WHERE branch = {PLACEHOLDER} AND cluster = {PLACEHOLDER} AND site_id = {PLACEHOLDER} "
+            f"AND kategori IS NOT NULL AND kategori != '' ORDER BY kategori",
+            (branch, cluster, site_id)
+        )
+        categories = [row['kategori'] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
+        conn.close()
+        return categories
+    except Exception as e:
+        logger.error(f"Error getting potensi categories: {e}")
+        return []
+
+def get_potensi_categories_with_counts(branch, cluster, site_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT kategori, COUNT(*) as total FROM potensi_site "
+            f"WHERE branch = {PLACEHOLDER} AND cluster = {PLACEHOLDER} AND site_id = {PLACEHOLDER} "
+            f"AND kategori IS NOT NULL AND kategori != '' "
+            f"GROUP BY kategori "
+            f"ORDER BY kategori",
+            (branch, cluster, site_id)
+        )
+        results = []
+        for row in cursor.fetchall():
+            kategori = row['kategori'] if isinstance(row, dict) else row[0]
+            total = row['total'] if isinstance(row, dict) else row[1]
+            results.append({
+                'kategori': kategori,
+                'total': total
+            })
+        conn.close()
+        return results
+    except Exception as e:
+        logger.error(f"Error getting potensi categories with counts: {e}")
+        return []
+
+def get_potensi_by_category(branch, cluster, site_id, category):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT * FROM potensi_site "
+            f"WHERE branch = {PLACEHOLDER} AND cluster = {PLACEHOLDER} AND site_id = {PLACEHOLDER} AND kategori = {PLACEHOLDER} "
+            f"ORDER BY distance_km ASC",
+            (branch, cluster, site_id, category)
+        )
+        rows = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return rows
+    except Exception as e:
+        logger.error(f"Error getting potensi by category: {e}")
+        return []
+
+
 # --- Keyboard Markup Helpers ---
 
 def main_menu_keyboard():
@@ -365,7 +442,7 @@ def sites_keyboard(sites, back_callback):
 
 def site_options_keyboard(site_id):
     keyboard = [
-        [InlineKeyboardButton("1. 🔍 Check Site", callback_data=f"site_opt:check:{site_id}")],
+        [InlineKeyboardButton("1. 🔍 Check Potensi Site", callback_data=f"site_opt:potensi:{site_id}")],
         [InlineKeyboardButton("2. ➕ Add Site Data", callback_data=f"site_opt:add:{site_id}")],
         [InlineKeyboardButton("3. 🔄 Conversion Site", callback_data=f"site_opt:conv:{site_id}")],
         [InlineKeyboardButton("⬅️ Kembali", callback_data=f"site_opt:back")]
@@ -467,6 +544,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Auto-fill branch & cluster if not present
         branch, cluster = get_site_branch_and_cluster(site_id)
+        if not branch:
+            branch, cluster = get_potensi_branch_and_cluster(site_id)
         if branch:
             context.user_data['selected_branch'] = branch
         if cluster:
@@ -665,6 +744,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Auto-fill branch & cluster if not present
         if not context.user_data.get('selected_branch') or not context.user_data.get('selected_cluster'):
             branch, cluster = get_site_branch_and_cluster(site_id)
+            if not branch:
+                branch, cluster = get_potensi_branch_and_cluster(site_id)
             if branch:
                 context.user_data['selected_branch'] = branch
             if cluster:
@@ -678,30 +759,132 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=site_options_keyboard(site_id)
         )
         
-    elif data.startswith("site_opt:check:"):
+    elif data.startswith("site_opt:potensi:"):
         site_id = data.split(":", 2)[2]
-        stats = check_site_stats(site_id)
+        
+        # Resolve branch & cluster
+        branch = context.user_data.get('selected_branch', '')
+        cluster = context.user_data.get('selected_cluster', '')
+        if not branch or not cluster:
+            branch, cluster = get_site_branch_and_cluster(site_id)
+            if not branch:
+                branch, cluster = get_potensi_branch_and_cluster(site_id)
+            if branch:
+                context.user_data['selected_branch'] = branch
+            if cluster:
+                context.user_data['selected_cluster'] = cluster
+                
+        categories = get_potensi_categories_with_counts(branch, cluster, site_id)
+        if not categories:
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Kembali", callback_data=f"site_opt:back_to_menu:{site_id}")]
+            ])
+            await query.edit_message_text(
+                f"Tidak ada data potensi site untuk:\n"
+                f"Branch: {branch if branch else '-'}\n"
+                f"Cluster: {cluster if cluster else '-'}\n"
+                f"Site ID: {site_id}",
+                reply_markup=keyboard
+            )
+            return
+            
+        context.user_data['potensi_categories'] = categories
+        
+        keyboard = []
+        for i, item in enumerate(categories):
+            cat_name = item['kategori']
+            count = item['total']
+            button_text = f"{cat_name} ({count})"
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"pot_cat:{site_id}:{i}")])
+        keyboard.append([InlineKeyboardButton("⬅️ Kembali", callback_data=f"site_opt:back_to_menu:{site_id}")])
+        
+        await query.edit_message_text(
+            f"🔍 *CHECK POTENSI SITE: {site_id}*\n"
+            f"Branch: {branch if branch else '-'}\n"
+            f"Cluster: {cluster if cluster else '-'}\n\n"
+            f"Silakan pilih Kategori Potensi:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+
+    elif data.startswith("pot_cat:"):
+        _, site_id, idx_str = data.split(":", 2)
+        idx = int(idx_str)
+        
+        categories = context.user_data.get('potensi_categories', [])
+        if not categories or idx >= len(categories):
+            branch = context.user_data.get('selected_branch', '')
+            cluster = context.user_data.get('selected_cluster', '')
+            categories = get_potensi_categories_with_counts(branch, cluster, site_id)
+            context.user_data['potensi_categories'] = categories
+            
+        if not categories or idx >= len(categories):
+            await query.edit_message_text(
+                "Terjadi kesalahan: Kategori tidak ditemukan.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⬅️ Kembali", callback_data=f"site_opt:back_to_menu:{site_id}")]
+                ])
+            )
+            return
+            
+        category = categories[idx]['kategori']
+        branch = context.user_data.get('selected_branch', '')
+        cluster = context.user_data.get('selected_cluster', '')
+        
+        potensi_list = get_potensi_by_category(branch, cluster, site_id, category)
         
         text = (
-            f"📊 *STATISTIK SITE ID: {site_id}*\n"
-            f"• Total Pelanggan: {stats['total']}\n"
-            f"• Bersedia (Y): {stats['acq_y']}\n"
-            f"• Tidak Bersedia (N): {stats['acq_n']}\n"
-            f"• Belum Diproses: {stats['unprocessed']}\n\n"
-            f"📋 *Daftar Pelanggan (Maks 10):*\n"
+            f"📋 *POTENSI SITE: {site_id}*\n"
+            f"Kategori: *{category}*\n"
+            f"Branch: {branch if branch else '-'}\n"
+            f"Cluster: {cluster if cluster else '-'}\n\n"
+            f"*Daftar Lokasi Potensi:*\n"
         )
         
-        if stats['customers']:
-            for i, cust in enumerate(stats['customers']):
-                status_acq = cust.get('Acq') or 'Belum Diproses'
-                text += f"{i+1}. IH: {cust.get('bb_id')} | Nama: {cust.get('Nama')} (Status: {status_acq})\n"
+        if potensi_list:
+            for i, p in enumerate(potensi_list):
+                dist = p.get('distance_km')
+                dist_str = f"{dist} Km" if dist is not None else "-"
+                text += (
+                    f"{i+1}. *{p.get('nama')}*\n"
+                    f"   • Jarak: {dist_str}\n"
+                    f"   • Koordinat: `{p.get('latitude')},{p.get('longitude')}`\n"
+                )
         else:
-            text += "Tidak ada data pelanggan.\n"
+            text += "Tidak ada data lokasi potensi untuk kategori ini.\n"
             
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("⬅️ Kembali", callback_data=f"site_opt:back_to_menu:{site_id}")]
+            [InlineKeyboardButton("⬅️ Kembali ke Kategori", callback_data=f"pot_back_to_cats:{site_id}")],
+            [InlineKeyboardButton("🏠 Menu Utama", callback_data=f"site_opt:back_to_menu:{site_id}")]
         ])
         await query.edit_message_text(text, reply_markup=keyboard, parse_mode="Markdown")
+
+    elif data.startswith("pot_back_to_cats:"):
+        site_id = data.split(":", 1)[1]
+        branch = context.user_data.get('selected_branch', '')
+        cluster = context.user_data.get('selected_cluster', '')
+        categories = context.user_data.get('potensi_categories', [])
+        
+        if not categories:
+            categories = get_potensi_categories_with_counts(branch, cluster, site_id)
+            context.user_data['potensi_categories'] = categories
+            
+        keyboard = []
+        for i, item in enumerate(categories):
+            cat_name = item['kategori']
+            count = item['total']
+            button_text = f"{cat_name} ({count})"
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"pot_cat:{site_id}:{i}")])
+        keyboard.append([InlineKeyboardButton("⬅️ Kembali", callback_data=f"site_opt:back_to_menu:{site_id}")])
+        
+        await query.edit_message_text(
+            f"🔍 *CHECK POTENSI SITE: {site_id}*\n"
+            f"Branch: {branch if branch else '-'}\n"
+            f"Cluster: {cluster if cluster else '-'}\n\n"
+            f"Silakan pilih Kategori Potensi:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
 
     elif data.startswith("site_opt:add:"):
         site_id = data.split(":", 2)[2]
