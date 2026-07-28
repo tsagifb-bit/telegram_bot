@@ -239,6 +239,101 @@ def update_db_perdana(bb_id, perdana_val):
     conn.commit()
     conn.close()
 
+def check_bb_id_exists(bb_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(f"SELECT COUNT(*) as total FROM customers WHERE bb_id = {PLACEHOLDER}", (bb_id,))
+        row = cursor.fetchone()
+        count = row['total'] if isinstance(row, dict) else row[0]
+        conn.close()
+        return count > 0
+    except Exception as e:
+        logger.error(f"Error checking bb_id: {e}")
+        return False
+
+def add_new_customer(bb_id, site_id, branch, cluster, nama, no_hp, alamat):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"INSERT INTO customers (bb_id, Nearest_Site_ID, Branch, Cluster, Nama, No_HP, Alamat) "
+            f"VALUES ({PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER})",
+            (bb_id, site_id, branch, cluster, nama, no_hp, alamat)
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Error inserting new customer: {e}")
+        return False
+
+def get_site_branch_and_cluster(site_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT Branch, Cluster FROM customers WHERE Nearest_Site_ID = {PLACEHOLDER} AND Branch IS NOT NULL AND Branch != '' LIMIT 1",
+            (site_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            return row['Branch'], row['Cluster']
+    except Exception as e:
+        logger.error(f"Error getting branch/cluster for site {site_id}: {e}")
+    return '', ''
+
+def check_site_stats(site_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Total
+        cursor.execute(f"SELECT COUNT(*) as total FROM customers WHERE Nearest_Site_ID = {PLACEHOLDER}", (site_id,))
+        r = cursor.fetchone()
+        total = r['total'] if isinstance(r, dict) else r[0]
+        
+        # Acq = 'Y'
+        cursor.execute(f"SELECT COUNT(*) as total FROM customers WHERE Nearest_Site_ID = {PLACEHOLDER} AND UPPER(TRIM(Acq)) = 'Y'", (site_id,))
+        r = cursor.fetchone()
+        acq_y = r['total'] if isinstance(r, dict) else r[0]
+        
+        # Acq = 'N'
+        cursor.execute(f"SELECT COUNT(*) as total FROM customers WHERE Nearest_Site_ID = {PLACEHOLDER} AND UPPER(TRIM(Acq)) = 'N'", (site_id,))
+        r = cursor.fetchone()
+        acq_n = r['total'] if isinstance(r, dict) else r[0]
+        
+        # Unprocessed
+        cursor.execute(f"SELECT COUNT(*) as total FROM customers WHERE Nearest_Site_ID = {PLACEHOLDER} AND (Acq IS NULL OR (UPPER(TRIM(Acq)) != 'Y' AND UPPER(TRIM(Acq)) != 'N'))", (site_id,))
+        r = cursor.fetchone()
+        unprocessed = r['total'] if isinstance(r, dict) else r[0]
+        
+        # List of first 10 customers
+        cursor.execute(f"SELECT bb_id, Nama, No_HP, Acq FROM customers WHERE Nearest_Site_ID = {PLACEHOLDER} LIMIT 10", (site_id,))
+        rows = cursor.fetchall()
+        customers = []
+        for row in rows:
+            customers.append(dict(row))
+            
+        conn.close()
+        return {
+            'total': total,
+            'acq_y': acq_y,
+            'acq_n': acq_n,
+            'unprocessed': unprocessed,
+            'customers': customers
+        }
+    except Exception as e:
+        logger.error(f"Error getting stats for site {site_id}: {e}")
+        return {
+            'total': 0,
+            'acq_y': 0,
+            'acq_n': 0,
+            'unprocessed': 0,
+            'customers': []
+        }
+
 
 # --- Keyboard Markup Helpers ---
 
@@ -267,6 +362,15 @@ def cluster_keyboard():
 
 def sites_keyboard(sites, back_callback):
     return create_grid_keyboard(sites, "site_id", cols=3, back_callback=back_callback)
+
+def site_options_keyboard(site_id):
+    keyboard = [
+        [InlineKeyboardButton("1. 🔍 Check Site", callback_data=f"site_opt:check:{site_id}")],
+        [InlineKeyboardButton("2. ➕ Add Site Data", callback_data=f"site_opt:add:{site_id}")],
+        [InlineKeyboardButton("3. 🔄 Conversion Site", callback_data=f"site_opt:conv:{site_id}")],
+        [InlineKeyboardButton("⬅️ Kembali", callback_data=f"site_opt:back")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
 def acq_keyboard(bb_id):
     keyboard = [
@@ -336,23 +440,49 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = context.user_data.get('state')
-    if state == 'waiting_for_site_id':
-        site_id = update.message.text.strip().upper()
-        customers = get_customers_by_site_id(site_id)
-        if not customers:
-            await update.message.reply_text(
-                f"SITE ID '{site_id}' tidak ditemukan (atau semua data pelanggan pada SITE ini sudah diproses).\n"
-                "Silakan ketik SITE ID yang benar (atau ketik /start untuk kembali):"
-            )
-            return
-        
+    text = update.message.text.strip()
+    
+    # Global cancel command/word check
+    if text.lower() in ('/cancel', 'cancel', 'batal'):
         context.user_data['state'] = None
-        context.user_data['search_results'] = customers
-        context.user_data['current_index'] = 0
-        await show_customer_for_update(update, context)
+        site_id = context.user_data.get('selected_site')
+        
+        # Clear temporary add customer keys
+        for key in ['add_bb_id', 'add_nama', 'add_no_hp', 'add_alamat']:
+            context.user_data.pop(key, None)
+            
+        if site_id:
+            await update.message.reply_text(
+                f"Tindakan dibatalkan.\n\nSITE ID: {site_id}\nSilakan pilih tindakan:",
+                reply_markup=site_options_keyboard(site_id)
+            )
+        else:
+            await update.message.reply_text("Tindakan dibatalkan. Silakan ketik /start untuk ke menu utama.")
+        return
+
+    if state == 'waiting_for_site_id':
+        site_id = text.upper()
+        context.user_data['state'] = None
+        context.user_data['selected_site'] = site_id
+        
+        # Auto-fill branch & cluster if not present
+        branch, cluster = get_site_branch_and_cluster(site_id)
+        if branch:
+            context.user_data['selected_branch'] = branch
+        if cluster:
+            context.user_data['selected_cluster'] = cluster
+            
+        await update.message.reply_text(
+            f"SITE ID: {site_id}\n"
+            f"Branch: {branch if branch else '-'}\n"
+            f"Cluster: {cluster if cluster else '-'}\n\n"
+            "Silakan pilih tindakan yang ingin dilakukan:",
+            reply_markup=site_options_keyboard(site_id)
+        )
+        
     elif state == 'waiting_for_perdana_numbers':
         bb_id = context.user_data.get('pending_bb_id')
-        perdana_val = update.message.text.strip()
+        perdana_val = text
         
         # Simpan nilai perdana ke Database
         try:
@@ -379,7 +509,93 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await show_customer_new_message(update.message.chat_id, context)
         else:
             await update.message.reply_text("Semua data pelanggan untuk SITE ID ini telah diproses.")
-            context.user_data.clear()
+            # Go back to site menu
+            site_id = context.user_data.get('selected_site')
+            if site_id:
+                await update.message.reply_text(
+                    f"Kembali ke menu tindakan untuk SITE ID {site_id}:",
+                    reply_markup=site_options_keyboard(site_id)
+                )
+            else:
+                context.user_data.clear()
+
+    elif state == 'waiting_for_add_bb_id':
+        bb_id = text
+        if check_bb_id_exists(bb_id):
+            await update.message.reply_text(
+                f"Nomor IH (bb_id) '{bb_id}' sudah terdaftar. Silakan masukkan Nomor IH yang lain (atau ketik 'batal'):"
+            )
+            return
+        
+        context.user_data['add_bb_id'] = bb_id
+        context.user_data['state'] = 'waiting_for_add_nama'
+        await update.message.reply_text(
+            f"Nomor IH diterima: {bb_id}\n\n"
+            f"Silakan masukkan **Nama Pelanggan**:"
+        )
+
+    elif state == 'waiting_for_add_nama':
+        nama = text
+        context.user_data['add_nama'] = nama
+        context.user_data['state'] = 'waiting_for_add_no_hp'
+        await update.message.reply_text(
+            f"Nama diterima: {nama}\n\n"
+            f"Silakan masukkan **Nomor HP Pelanggan**:"
+        )
+
+    elif state == 'waiting_for_add_no_hp':
+        no_hp = text
+        context.user_data['add_no_hp'] = no_hp
+        context.user_data['state'] = 'waiting_for_add_alamat'
+        await update.message.reply_text(
+            f"Nomor HP diterima: {no_hp}\n\n"
+            f"Silakan masukkan **Alamat Pelanggan**:"
+        )
+
+    elif state == 'waiting_for_add_alamat':
+        alamat = text
+        bb_id = context.user_data.get('add_bb_id')
+        site_id = context.user_data.get('selected_site')
+        branch = context.user_data.get('selected_branch', '')
+        cluster = context.user_data.get('selected_cluster', '')
+        nama = context.user_data.get('add_nama', '')
+        no_hp = context.user_data.get('add_no_hp', '')
+        
+        success = add_new_customer(
+            bb_id=bb_id,
+            site_id=site_id,
+            branch=branch,
+            cluster=cluster,
+            nama=nama,
+            no_hp=no_hp,
+            alamat=alamat
+        )
+        
+        # Clear temporary keys and states
+        context.user_data['state'] = None
+        for key in ['add_bb_id', 'add_nama', 'add_no_hp', 'add_alamat']:
+            context.user_data.pop(key, None)
+            
+        if success:
+            await update.message.reply_text(
+                f"✅ Data pelanggan baru berhasil ditambahkan!\n\n"
+                f"• SITE ID: {site_id}\n"
+                f"• IH (bb_id): {bb_id}\n"
+                f"• Nama: {nama}\n"
+                f"• No HP: {no_hp}\n"
+                f"• Alamat: {alamat}"
+            )
+        else:
+            await update.message.reply_text("⚠️ Terjadi kesalahan saat menyimpan data baru ke database.")
+            
+        # Go back to site menu
+        if site_id:
+            await update.message.reply_text(
+                f"SITE ID: {site_id}\n"
+                f"Silakan pilih tindakan berikutnya:",
+                reply_markup=site_options_keyboard(site_id)
+            )
+            
     else:
         await update.message.reply_text("Silakan jalankan perintah /start untuk memulai.")
 
@@ -444,13 +660,76 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
     elif data.startswith("site_id:"):
         site_id = data.split(":", 1)[1]
+        context.user_data['selected_site'] = site_id
+        
+        # Auto-fill branch & cluster if not present
+        if not context.user_data.get('selected_branch') or not context.user_data.get('selected_cluster'):
+            branch, cluster = get_site_branch_and_cluster(site_id)
+            if branch:
+                context.user_data['selected_branch'] = branch
+            if cluster:
+                context.user_data['selected_cluster'] = cluster
+                
+        await query.edit_message_text(
+            f"SITE ID: {site_id}\n"
+            f"Branch: {context.user_data.get('selected_branch', '-')}\n"
+            f"Cluster: {context.user_data.get('selected_cluster', '-')}\n\n"
+            "Silakan pilih tindakan yang ingin dilakukan:",
+            reply_markup=site_options_keyboard(site_id)
+        )
+        
+    elif data.startswith("site_opt:check:"):
+        site_id = data.split(":", 2)[2]
+        stats = check_site_stats(site_id)
+        
+        text = (
+            f"📊 *STATISTIK SITE ID: {site_id}*\n"
+            f"• Total Pelanggan: {stats['total']}\n"
+            f"• Bersedia (Y): {stats['acq_y']}\n"
+            f"• Tidak Bersedia (N): {stats['acq_n']}\n"
+            f"• Belum Diproses: {stats['unprocessed']}\n\n"
+            f"📋 *Daftar Pelanggan (Maks 10):*\n"
+        )
+        
+        if stats['customers']:
+            for i, cust in enumerate(stats['customers']):
+                status_acq = cust.get('Acq') or 'Belum Diproses'
+                text += f"{i+1}. IH: {cust.get('bb_id')} | Nama: {cust.get('Nama')} (Status: {status_acq})\n"
+        else:
+            text += "Tidak ada data pelanggan.\n"
+            
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Kembali", callback_data=f"site_opt:back_to_menu:{site_id}")]
+        ])
+        await query.edit_message_text(text, reply_markup=keyboard, parse_mode="Markdown")
+
+    elif data.startswith("site_opt:add:"):
+        site_id = data.split(":", 2)[2]
+        context.user_data['selected_site'] = site_id
+        context.user_data['state'] = 'waiting_for_add_bb_id'
+        
+        if not context.user_data.get('selected_branch') or not context.user_data.get('selected_cluster'):
+            branch, cluster = get_site_branch_and_cluster(site_id)
+            if branch:
+                context.user_data['selected_branch'] = branch
+            if cluster:
+                context.user_data['selected_cluster'] = cluster
+                
+        await query.edit_message_text(
+            f"➕ *Tambah Data Pelanggan Baru*\n"
+            f"Site ID: {site_id}\n\n"
+            f"Silakan masukkan **Nomor IH (bb_id)**:\n"
+            f"(Ketik 'batal' untuk membatalkan)",
+            parse_mode="Markdown"
+        )
+
+    elif data.startswith("site_opt:conv:"):
+        site_id = data.split(":", 2)[2]
         customers = get_customers_by_site_id(site_id)
         if not customers:
-            branch_name = context.user_data.get('selected_branch')
-            cluster_name = context.user_data.get('selected_cluster')
-            sites = get_site_ids_by_branch_and_cluster(branch_name, cluster_name) if (branch_name and cluster_name) else []
-            keyboard = sites_keyboard(sites, back_callback="menu:cluster") if sites else create_grid_keyboard([], "", back_callback="menu:cluster")
-            
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ Kembali", callback_data=f"site_opt:back_to_menu:{site_id}")]
+            ])
             await query.edit_message_text(
                 f"Tidak ada data pelanggan yang belum disetujui (Y) untuk SITE ID {site_id}.",
                 reply_markup=keyboard
@@ -460,6 +739,30 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['search_results'] = customers
             context.user_data['current_index'] = 0
             await show_customer_for_query(query, context)
+
+    elif data.startswith("site_opt:back_to_menu:"):
+        site_id = data.split(":", 2)[2]
+        await query.edit_message_text(
+            f"SITE ID: {site_id}\n"
+            f"Branch: {context.user_data.get('selected_branch', '-')}\n"
+            f"Cluster: {context.user_data.get('selected_cluster', '-')}\n\n"
+            "Silakan pilih tindakan yang ingin dilakukan:",
+            reply_markup=site_options_keyboard(site_id)
+        )
+
+    elif data == "site_opt:back":
+        branch_name = context.user_data.get('selected_branch')
+        cluster_name = context.user_data.get('selected_cluster')
+        if branch_name and cluster_name:
+            sites = get_site_ids_by_branch_and_cluster(branch_name, cluster_name)
+            await query.edit_message_text(
+                f"Pilih SITE ID di Cluster {cluster_name} (Branch {branch_name}):",
+                reply_markup=sites_keyboard(sites, back_callback="menu:cluster")
+            )
+        else:
+            context.user_data.clear()
+            context.user_data['state'] = 'waiting_for_site_id'
+            await query.edit_message_text("Silakan ketik SITE ID yang ingin Anda cari (Contoh: SLT077):")
             
     elif data.startswith("acq:"):
         _, answer, bb_id = data.split(":", 2)
