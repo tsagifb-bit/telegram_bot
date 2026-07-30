@@ -411,6 +411,67 @@ def get_potensi_by_category(branch, cluster, site_id, category):
         logger.error(f"Error getting potensi by category: {e}")
         return []
 
+def get_site_metadata(site_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT branch, cluster, kabupaten FROM potensi_site "
+            f"WHERE site_id = {PLACEHOLDER} AND branch IS NOT NULL AND branch != '' LIMIT 1",
+            (site_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            return row['branch'], row['cluster'], row['kabupaten']
+    except Exception as e:
+        logger.error(f"Error getting metadata for site {site_id} from potensi_site: {e}")
+    return '', '', ''
+
+def get_next_potensi_no():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT MAX(no) as max_no FROM potensi_site")
+        row = cursor.fetchone()
+        conn.close()
+        max_no = row['max_no'] if isinstance(row, dict) else row[0]
+        if max_no is None:
+            return 1
+        return int(max_no) + 1
+    except Exception as e:
+        logger.error(f"Error getting next potensi no: {e}")
+        return 1
+
+def get_all_distinct_categories():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT kategori FROM potensi_site WHERE kategori IS NOT NULL AND kategori != '' ORDER BY kategori")
+        categories = [row['kategori'] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
+        conn.close()
+        return categories
+    except Exception as e:
+        logger.error(f"Error getting distinct categories: {e}")
+        return []
+
+def add_new_potensi(site_id, nama, kategori, branch, cluster, kabupaten, longitude, latitude, distance_km):
+    try:
+        no = get_next_potensi_no()
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"INSERT INTO potensi_site (no, site_id, nama, kategori, kabupaten, branch, cluster, longitude, latitude, distance_km) "
+            f"VALUES ({PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER})",
+            (no, site_id, nama, kategori, kabupaten, branch, cluster, longitude, latitude, distance_km)
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Error inserting new potensi: {e}")
+        return False
+
 
 # --- Keyboard Markup Helpers ---
 
@@ -524,8 +585,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['state'] = None
         site_id = context.user_data.get('selected_site')
         
-        # Clear temporary add customer keys
-        for key in ['add_bb_id', 'add_nama', 'add_no_hp', 'add_alamat']:
+        # Clear temporary keys
+        for key in ['add_bb_id', 'add_nama', 'add_no_hp', 'add_alamat', 'add_potensi_kategori', 'add_potensi_nama', 'add_potensi_long', 'add_potensi_lat', 'add_potensi_distance', 'all_categories']:
             context.user_data.pop(key, None)
             
         if site_id:
@@ -598,74 +659,116 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 context.user_data.clear()
 
-    elif state == 'waiting_for_add_bb_id':
-        bb_id = text
-        if check_bb_id_exists(bb_id):
+    elif state == 'waiting_for_add_potensi_kategori':
+        category = text
+        context.user_data['add_potensi_kategori'] = category
+        context.user_data['state'] = 'waiting_for_add_potensi_nama'
+        site_id = context.user_data.get('selected_site')
+        
+        await update.message.reply_text(
+            f"Kategori diterima: *{category}*\n\n"
+            f"Silakan masukkan **Nama Lokasi**:\n"
+            f"(Ketik 'batal' untuk membatalkan)",
+            parse_mode="Markdown"
+        )
+
+    elif state == 'waiting_for_add_potensi_nama':
+        nama = text
+        context.user_data['add_potensi_nama'] = nama
+        context.user_data['state'] = 'waiting_for_add_potensi_long'
+        
+        await update.message.reply_text(
+            f"Nama Lokasi diterima: *{nama}*\n\n"
+            f"Silakan masukkan nilai **Longitude** (contoh: 108.10042):\n"
+            f"(Ketik 'batal' untuk membatalkan)",
+            parse_mode="Markdown"
+        )
+
+    elif state == 'waiting_for_add_potensi_long':
+        try:
+            longitude = float(text)
+        except ValueError:
             await update.message.reply_text(
-                f"Nomor IH (bb_id) '{bb_id}' sudah terdaftar. Silakan masukkan Nomor IH yang lain (atau ketik 'batal'):"
+                "⚠️ Format Longitude salah. Silakan masukkan angka desimal yang valid (contoh: 108.10042):"
             )
             return
+            
+        context.user_data['add_potensi_long'] = longitude
+        context.user_data['state'] = 'waiting_for_add_potensi_lat'
         
-        context.user_data['add_bb_id'] = bb_id
-        context.user_data['state'] = 'waiting_for_add_nama'
         await update.message.reply_text(
-            f"Nomor IH diterima: {bb_id}\n\n"
-            f"Silakan masukkan **Nama Pelanggan**:"
+            f"Longitude diterima: `{longitude}`\n\n"
+            f"Silakan masukkan nilai **Latitude** (contoh: -3.013528):\n"
+            f"(Ketik 'batal' untuk membatalkan)",
+            parse_mode="Markdown"
         )
 
-    elif state == 'waiting_for_add_nama':
-        nama = text
-        context.user_data['add_nama'] = nama
-        context.user_data['state'] = 'waiting_for_add_no_hp'
+    elif state == 'waiting_for_add_potensi_lat':
+        try:
+            latitude = float(text)
+        except ValueError:
+            await update.message.reply_text(
+                "⚠️ Format Latitude salah. Silakan masukkan angka desimal yang valid (contoh: -3.013528):"
+            )
+            return
+            
+        context.user_data['add_potensi_lat'] = latitude
+        context.user_data['state'] = 'waiting_for_add_potensi_distance'
+        
         await update.message.reply_text(
-            f"Nama diterima: {nama}\n\n"
-            f"Silakan masukkan **Nomor HP Pelanggan**:"
+            f"Latitude diterima: `{latitude}`\n\n"
+            f"Silakan masukkan nilai **Jarak (Km)** (contoh: 1.33):\n"
+            f"(Ketik 'batal' untuk membatalkan)",
+            parse_mode="Markdown"
         )
 
-    elif state == 'waiting_for_add_no_hp':
-        no_hp = text
-        context.user_data['add_no_hp'] = no_hp
-        context.user_data['state'] = 'waiting_for_add_alamat'
-        await update.message.reply_text(
-            f"Nomor HP diterima: {no_hp}\n\n"
-            f"Silakan masukkan **Alamat Pelanggan**:"
-        )
-
-    elif state == 'waiting_for_add_alamat':
-        alamat = text
-        bb_id = context.user_data.get('add_bb_id')
+    elif state == 'waiting_for_add_potensi_distance':
+        try:
+            distance_km = float(text)
+        except ValueError:
+            await update.message.reply_text(
+                "⚠️ Format Jarak salah. Silakan masukkan angka desimal yang valid (contoh: 1.33):"
+            )
+            return
+            
         site_id = context.user_data.get('selected_site')
         branch = context.user_data.get('selected_branch', '')
         cluster = context.user_data.get('selected_cluster', '')
-        nama = context.user_data.get('add_nama', '')
-        no_hp = context.user_data.get('add_no_hp', '')
+        kabupaten = context.user_data.get('selected_kabupaten', '')
+        kategori = context.user_data.get('add_potensi_kategori', '')
+        nama = context.user_data.get('add_potensi_nama', '')
+        longitude = context.user_data.get('add_potensi_long')
+        latitude = context.user_data.get('add_potensi_lat')
         
-        success = add_new_customer(
-            bb_id=bb_id,
+        success = add_new_potensi(
             site_id=site_id,
+            nama=nama,
+            kategori=kategori,
             branch=branch,
             cluster=cluster,
-            nama=nama,
-            no_hp=no_hp,
-            alamat=alamat
+            kabupaten=kabupaten,
+            longitude=longitude,
+            latitude=latitude,
+            distance_km=distance_km
         )
         
-        # Clear temporary keys and states
+        # Clear temporary keys and state
         context.user_data['state'] = None
-        for key in ['add_bb_id', 'add_nama', 'add_no_hp', 'add_alamat']:
+        for key in ['add_potensi_kategori', 'add_potensi_nama', 'add_potensi_long', 'add_potensi_lat', 'add_potensi_distance', 'all_categories']:
             context.user_data.pop(key, None)
             
         if success:
             await update.message.reply_text(
-                f"✅ Data pelanggan baru berhasil ditambahkan!\n\n"
+                f"✅ Data potensi site baru berhasil ditambahkan!\n\n"
                 f"• SITE ID: {site_id}\n"
-                f"• IH (bb_id): {bb_id}\n"
-                f"• Nama: {nama}\n"
-                f"• No HP: {no_hp}\n"
-                f"• Alamat: {alamat}"
+                f"• Kategori: {kategori}\n"
+                f"• Nama Lokasi: {nama}\n"
+                f"• Longitude: {longitude}\n"
+                f"• Latitude: {latitude}\n"
+                f"• Jarak: {distance_km} Km"
             )
         else:
-            await update.message.reply_text("⚠️ Terjadi kesalahan saat menyimpan data baru ke database.")
+            await update.message.reply_text("⚠️ Terjadi kesalahan saat menyimpan data potensi baru ke database.")
             
         # Go back to site menu
         if site_id:
@@ -889,19 +992,62 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("site_opt:add:"):
         site_id = data.split(":", 2)[2]
         context.user_data['selected_site'] = site_id
-        context.user_data['state'] = 'waiting_for_add_bb_id'
         
-        if not context.user_data.get('selected_branch') or not context.user_data.get('selected_cluster'):
-            branch, cluster = get_site_branch_and_cluster(site_id)
-            if branch:
-                context.user_data['selected_branch'] = branch
-            if cluster:
-                context.user_data['selected_cluster'] = cluster
-                
+        branch, cluster, kabupaten = get_site_metadata(site_id)
+        if branch:
+            context.user_data['selected_branch'] = branch
+        if cluster:
+            context.user_data['selected_cluster'] = cluster
+        if kabupaten:
+            context.user_data['selected_kabupaten'] = kabupaten
+            
+        context.user_data['state'] = 'waiting_for_add_potensi_kategori'
+        
+        categories = get_all_distinct_categories()
+        context.user_data['all_categories'] = categories
+        
+        keyboard = []
+        for i, cat in enumerate(categories):
+            keyboard.append([InlineKeyboardButton(cat, callback_data=f"add_pot_cat:{site_id}:{i}")])
+        keyboard.append([InlineKeyboardButton("❌ Batal", callback_data=f"site_opt:back_to_menu:{site_id}")])
+        
         await query.edit_message_text(
-            f"➕ *Tambah Data Pelanggan Baru*\n"
-            f"Site ID: {site_id}\n\n"
-            f"Silakan masukkan **Nomor IH (bb_id)**:\n"
+            f"➕ *Tambah Potensi Site Baru*\n"
+            f"Site ID: {site_id}\n"
+            f"Branch: {branch if branch else '-'}\n"
+            f"Cluster: {cluster if cluster else '-'}\n\n"
+            f"Silakan pilih **Kategori** atau ketik kategori baru:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
+        )
+
+    elif data.startswith("add_pot_cat:"):
+        _, site_id, idx_str = data.split(":", 2)
+        idx = int(idx_str)
+        
+        categories = context.user_data.get('all_categories', [])
+        if not categories or idx >= len(categories):
+            categories = get_all_distinct_categories()
+            context.user_data['all_categories'] = categories
+            
+        if not categories or idx >= len(categories):
+            await query.edit_message_text(
+                "Terjadi kesalahan: Kategori tidak ditemukan.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⬅️ Kembali", callback_data=f"site_opt:back_to_menu:{site_id}")]
+                ])
+            )
+            return
+            
+        category = categories[idx]
+        context.user_data['add_potensi_kategori'] = category
+        context.user_data['state'] = 'waiting_for_add_potensi_nama'
+        
+        await query.edit_message_text(
+            f"➕ *Tambah Potensi Site Baru*\n"
+            f"Site ID: {site_id}\n"
+            f"Kategori: *{category}*\n\n"
+            f"Silakan masukkan **Nama Lokasi**:\n"
             f"(Ketik 'batal' untuk membatalkan)",
             parse_mode="Markdown"
         )
