@@ -1,4 +1,5 @@
 import os
+import math
 import sqlite3
 import pymysql
 import logging
@@ -472,6 +473,67 @@ def add_new_potensi(site_id, nama, kategori, branch, cluster, kabupaten, longitu
         logger.error(f"Error inserting new potensi: {e}")
         return False
 
+def calculate_haversine_distance(lat1, lon1, lat2, lon2):
+    try:
+        # Radius of the earth in km
+        R = 6371.0
+        
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
+        
+        a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        
+        distance = R * c
+        return round(distance, 2)
+    except Exception as e:
+        logger.error(f"Error calculating haversine distance: {e}")
+        return 0.0
+
+def get_site_focus_coords(site_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT latitude, longitude FROM site_focus WHERE site = {PLACEHOLDER} LIMIT 1",
+            (site_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            lat = row['latitude'] if isinstance(row, dict) else row[0]
+            lon = row['longitude'] if isinstance(row, dict) else row[1]
+            return float(lat), float(lon)
+    except Exception as e:
+        logger.error(f"Error getting coordinates for site {site_id} from site_focus: {e}")
+    return None
+
+def get_site_coordinates(site_id):
+    # Try site_focus table first
+    coords = get_site_focus_coords(site_id)
+    if coords:
+        return coords
+        
+    # Fallback to potensi_site table if not found in site_focus
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT latitude, longitude FROM potensi_site "
+            f"WHERE site_id = {PLACEHOLDER} AND latitude IS NOT NULL AND latitude != 0.0 LIMIT 1",
+            (site_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            lat = row['latitude'] if isinstance(row, dict) else row[0]
+            lon = row['longitude'] if isinstance(row, dict) else row[1]
+            return float(lat), float(lon)
+    except Exception as e:
+        logger.error(f"Error getting coordinates for site {site_id} from potensi_site fallback: {e}")
+        
+    return None
+
 
 # --- Keyboard Markup Helpers ---
 
@@ -709,16 +771,71 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         context.user_data['add_potensi_lat'] = latitude
         context.user_data['add_potensi_long'] = longitude
-        context.user_data['state'] = 'waiting_for_add_potensi_distance'
         
-        await update.message.reply_text(
-            f"Koordinat diterima:\n"
-            f"• Latitude: `{latitude}`\n"
-            f"• Longitude: `{longitude}`\n\n"
-            f"Silakan masukkan nilai **Jarak (Km)** (contoh: 1.33):\n"
-            f"(Ketik 'batal' untuk membatalkan)",
-            parse_mode="Markdown"
-        )
+        # Look up parent site coordinates to auto-calculate distance
+        site_id = context.user_data.get('selected_site')
+        site_coords = get_site_coordinates(site_id)
+        
+        if site_coords:
+            site_lat, site_lon = site_coords
+            distance_km = calculate_haversine_distance(latitude, longitude, site_lat, site_lon)
+            
+            # Save directly to database
+            branch = context.user_data.get('selected_branch', '')
+            cluster = context.user_data.get('selected_cluster', '')
+            kabupaten = context.user_data.get('selected_kabupaten', '')
+            kategori = context.user_data.get('add_potensi_kategori', '')
+            nama = context.user_data.get('add_potensi_nama', '')
+            
+            success = add_new_potensi(
+                site_id=site_id,
+                nama=nama,
+                kategori=kategori,
+                branch=branch,
+                cluster=cluster,
+                kabupaten=kabupaten,
+                longitude=longitude,
+                latitude=latitude,
+                distance_km=distance_km
+            )
+            
+            # Clear state and temporary keys
+            context.user_data['state'] = None
+            for key in ['add_potensi_kategori', 'add_potensi_nama', 'add_potensi_long', 'add_potensi_lat', 'add_potensi_distance', 'all_categories']:
+                context.user_data.pop(key, None)
+                
+            if success:
+                await update.message.reply_text(
+                    f"✅ Data potensi site baru berhasil ditambahkan!\n\n"
+                    f"• SITE ID: {site_id}\n"
+                    f"• Kategori: {kategori}\n"
+                    f"• Nama Lokasi: {nama}\n"
+                    f"• Longitude: {longitude}\n"
+                    f"• Latitude: {latitude}\n"
+                    f"• Jarak (Dihitung Otomatis): *{distance_km} Km* dari koordinat site (`{site_lat},{site_lon}`)",
+                    parse_mode="Markdown"
+                )
+            else:
+                await update.message.reply_text("⚠️ Terjadi kesalahan saat menyimpan data potensi baru ke database.")
+                
+            # Go back to site menu
+            if site_id:
+                await update.message.reply_text(
+                    f"SITE ID: {site_id}\n"
+                    f"Silakan pilih tindakan berikutnya:",
+                    reply_markup=site_options_keyboard(site_id)
+                )
+        else:
+            # Fallback if parent site coordinates cannot be found
+            context.user_data['state'] = 'waiting_for_add_potensi_distance'
+            await update.message.reply_text(
+                f"Koordinat lokasi baru diterima:\n"
+                f"• Latitude: `{latitude}`\n"
+                f"• Longitude: `{longitude}`\n\n"
+                f"⚠️ Koordinat Site {site_id} tidak ditemukan di database. Silakan masukkan nilai **Jarak (Km)** secara manual (contoh: 1.33):\n"
+                f"(Ketik 'batal' untuk membatalkan)",
+                parse_mode="Markdown"
+            )
 
     elif state == 'waiting_for_add_potensi_distance':
         try:
