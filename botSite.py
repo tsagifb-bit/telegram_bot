@@ -4,7 +4,7 @@ import sqlite3
 import pymysql
 import logging
 # pyrefly: ignore [missing-import]
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 # pyrefly: ignore [missing-import]
 from telegram.ext import (
     ApplicationBuilder,
@@ -656,12 +656,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.pop(key, None)
             
         if site_id:
+            await update.message.reply_text("Tindakan dibatalkan.", reply_markup=ReplyKeyboardRemove())
             await update.message.reply_text(
-                f"Tindakan dibatalkan.\n\nSITE ID: {site_id}\nSilakan pilih tindakan:",
+                f"SITE ID: {site_id}\nSilakan pilih tindakan:",
                 reply_markup=site_options_keyboard(site_id)
             )
         else:
-            await update.message.reply_text("Tindakan dibatalkan. Silakan ketik /start untuk ke menu utama.")
+            await update.message.reply_text("Tindakan dibatalkan. Silakan ketik /start untuk ke menu utama.", reply_markup=ReplyKeyboardRemove())
         return
 
     if state == 'waiting_for_site_id':
@@ -743,10 +744,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['add_potensi_nama'] = nama
         context.user_data['state'] = 'waiting_for_add_potensi_koordinat'
         
+        keyboard = [
+            [KeyboardButton("📍 Kirim Lokasi / Pilih dari Peta", request_location=True)]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+        
         await update.message.reply_text(
             f"Nama Lokasi diterima: *{nama}*\n\n"
-            f"📍 Silakan kirim lokasi tempat tersebut menggunakan fitur **Kirim Lokasi / Send Location** di Telegram (dari Google Maps) atau ketik manual dengan format `latitude,longitude` (contoh: `-3.023201,108.093191`):\n\n"
+            f"📍 Silakan pilih lokasi dari peta Google Maps menggunakan tombol **Kirim Lokasi / Pilih dari Peta** di bawah ini, atau ketik secara manual dengan format `latitude,longitude` (contoh: `-3.023201,108.093191`):\n\n"
             f"(Ketik 'batal' untuk membatalkan)",
+            reply_markup=reply_markup,
             parse_mode="Markdown"
         )
 
@@ -817,10 +824,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"• Longitude: {longitude}\n"
                     f"• Latitude: {latitude}\n"
                     f"• Jarak (Dihitung Otomatis): *{distance_km} Km* dari koordinat site (`{site_lat},{site_lon}`)",
+                    reply_markup=ReplyKeyboardRemove(),
                     parse_mode="Markdown"
                 )
             else:
-                await update.message.reply_text("⚠️ Terjadi kesalahan saat menyimpan data potensi baru ke database.")
+                await update.message.reply_text("⚠️ Terjadi kesalahan saat menyimpan data potensi baru ke database.", reply_markup=ReplyKeyboardRemove())
                 
             # Go back to site menu
             if site_id:
@@ -838,6 +846,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"• Longitude: `{longitude}`\n\n"
                 f"⚠️ Koordinat Site {site_id} tidak ditemukan di database. Silakan masukkan nilai **Jarak (Km)** secara manual (contoh: 1.33):\n"
                 f"(Ketik 'batal' untuk membatalkan)",
+                reply_markup=ReplyKeyboardRemove(),
                 parse_mode="Markdown"
             )
 
