@@ -578,7 +578,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = context.user_data.get('state')
-    text = update.message.text.strip()
+    text = update.message.text.strip() if update.message.text else ""
     
     # Global cancel command/word check
     if text.lower() in ('/cancel', 'cancel', 'batal'):
@@ -675,48 +675,46 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif state == 'waiting_for_add_potensi_nama':
         nama = text
         context.user_data['add_potensi_nama'] = nama
-        context.user_data['state'] = 'waiting_for_add_potensi_long'
+        context.user_data['state'] = 'waiting_for_add_potensi_koordinat'
         
         await update.message.reply_text(
             f"Nama Lokasi diterima: *{nama}*\n\n"
-            f"Silakan masukkan nilai **Longitude** (contoh: 108.10042):\n"
+            f"📍 Silakan kirim lokasi tempat tersebut menggunakan fitur **Kirim Lokasi / Send Location** di Telegram (dari Google Maps) atau ketik manual dengan format `latitude,longitude` (contoh: `-3.023201,108.093191`):\n\n"
             f"(Ketik 'batal' untuk membatalkan)",
             parse_mode="Markdown"
         )
 
-    elif state == 'waiting_for_add_potensi_long':
-        try:
-            longitude = float(text)
-        except ValueError:
+    elif state == 'waiting_for_add_potensi_koordinat':
+        if update.message.location:
+            latitude = update.message.location.latitude
+            longitude = update.message.location.longitude
+        elif text:
+            try:
+                parts = [p.strip() for p in text.split(',')]
+                if len(parts) != 2:
+                    raise ValueError("Must contain exactly one comma separating lat and long")
+                latitude = float(parts[0])
+                longitude = float(parts[1])
+            except (ValueError, IndexError):
+                await update.message.reply_text(
+                    "⚠️ Format koordinat tidak valid. Silakan kirim lokasi menggunakan fitur **Kirim Lokasi** di Telegram "
+                    "atau ketik manual dengan format `latitude,longitude` desimal (contoh: `-3.023201,108.093191`):"
+                )
+                return
+        else:
             await update.message.reply_text(
-                "⚠️ Format Longitude salah. Silakan masukkan angka desimal yang valid (contoh: 108.10042):"
+                "⚠️ Mohon kirim lokasi atau masukkan koordinat dalam format `latitude,longitude`:"
             )
             return
-            
-        context.user_data['add_potensi_long'] = longitude
-        context.user_data['state'] = 'waiting_for_add_potensi_lat'
-        
-        await update.message.reply_text(
-            f"Longitude diterima: `{longitude}`\n\n"
-            f"Silakan masukkan nilai **Latitude** (contoh: -3.013528):\n"
-            f"(Ketik 'batal' untuk membatalkan)",
-            parse_mode="Markdown"
-        )
 
-    elif state == 'waiting_for_add_potensi_lat':
-        try:
-            latitude = float(text)
-        except ValueError:
-            await update.message.reply_text(
-                "⚠️ Format Latitude salah. Silakan masukkan angka desimal yang valid (contoh: -3.013528):"
-            )
-            return
-            
         context.user_data['add_potensi_lat'] = latitude
+        context.user_data['add_potensi_long'] = longitude
         context.user_data['state'] = 'waiting_for_add_potensi_distance'
         
         await update.message.reply_text(
-            f"Latitude diterima: `{latitude}`\n\n"
+            f"Koordinat diterima:\n"
+            f"• Latitude: `{latitude}`\n"
+            f"• Longitude: `{longitude}`\n\n"
             f"Silakan masukkan nilai **Jarak (Km)** (contoh: 1.33):\n"
             f"(Ketik 'batal' untuk membatalkan)",
             parse_mode="Markdown"
@@ -1154,7 +1152,7 @@ if __name__ == '__main__':
     # Mendaftarkan handler
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(handle_callback))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler((filters.TEXT | filters.LOCATION) & ~filters.COMMAND, handle_message))
 
     print("Bot sedang berjalan...")
     app.run_polling()
