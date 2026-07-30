@@ -565,9 +565,9 @@ def sites_keyboard(sites, back_callback):
 
 def site_options_keyboard(site_id):
     keyboard = [
-        [InlineKeyboardButton("1. 🔍 Check Potensi Site", callback_data=f"site_opt:potensi:{site_id}")],
-        [InlineKeyboardButton("2. ➕ Add Site Data", callback_data=f"site_opt:add:{site_id}")],
-        [InlineKeyboardButton("3. 🔄 Conversion Site", callback_data=f"site_opt:conv:{site_id}")],
+        [InlineKeyboardButton("1. 🔍 Check Potensi Surrounding", callback_data=f"site_opt:potensi:{site_id}")],
+        [InlineKeyboardButton("2. ➕ Add New Potensi Surrounding", callback_data=f"site_opt:add:{site_id}")],
+        [InlineKeyboardButton("3. 🔄 Kunjungan Ke Pelanggan Indihome Non Tsel", callback_data=f"site_opt:conv:{site_id}")],
         [InlineKeyboardButton("⬅️ Kembali", callback_data=f"site_opt:back")]
     ]
     return InlineKeyboardMarkup(keyboard)
