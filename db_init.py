@@ -137,19 +137,13 @@ def init_db():
     cursor = conn.cursor()
     
     # 1. Initialize customers
-    customers_initialized = False
+    # Force drop and recreate to clean up and reload Book1.csv
     try:
-        cursor.execute("SELECT COUNT(*) AS total FROM customers")
-        row = cursor.fetchone()
-        if row:
-            count = row['total'] if isinstance(row, dict) else row[0]
-            if count > 0:
-                print(f"Customers table already initialized. Found {count} customers. Skipping customers import.")
-                customers_initialized = True
+        cursor.execute("DROP TABLE IF EXISTS customers")
     except Exception:
         pass
 
-    if not customers_initialized:
+    if True:
         # Create table (compatible syntax for both MySQL and SQLite)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS customers (
