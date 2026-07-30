@@ -142,15 +142,16 @@ def get_db_connection():
         return conn
 
 def get_unique_column_values(column_name):
+    db_col = column_name.lower()
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute(f"SELECT DISTINCT {column_name} FROM customers WHERE {column_name} IS NOT NULL AND {column_name} != '' ORDER BY {column_name}")
-        values = [row[column_name] for row in cursor.fetchall()]
+        cursor.execute(f"SELECT DISTINCT {db_col} FROM site_focus WHERE {db_col} IS NOT NULL AND {db_col} != '' ORDER BY {db_col}")
+        values = [row[db_col] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
         conn.close()
         return values
     except Exception as e:
-        logger.error(f"Error reading {column_name}: {e}")
+        logger.error(f"Error reading {column_name} from site_focus: {e}")
         return []
 
 def get_unique_branches():
@@ -164,14 +165,14 @@ def get_unique_clusters_by_branch(branch_name):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            f"SELECT DISTINCT Cluster FROM customers WHERE Branch = {PLACEHOLDER} AND Cluster IS NOT NULL AND Cluster != '' ORDER BY Cluster",
+            f"SELECT DISTINCT cluster FROM site_focus WHERE branch = {PLACEHOLDER} AND cluster IS NOT NULL AND cluster != '' ORDER BY cluster",
             (branch_name,)
         )
-        values = [row['Cluster'] for row in cursor.fetchall()]
+        values = [row['cluster'] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
         conn.close()
         return values
     except Exception as e:
-        logger.error(f"Error reading clusters for branch {branch_name}: {e}")
+        logger.error(f"Error reading clusters for branch {branch_name} from site_focus: {e}")
         return []
 
 def get_site_ids_by_branch_and_cluster(branch_name, cluster_name):
@@ -179,29 +180,30 @@ def get_site_ids_by_branch_and_cluster(branch_name, cluster_name):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            f"SELECT DISTINCT Nearest_Site_ID FROM customers WHERE Branch = {PLACEHOLDER} AND Cluster = {PLACEHOLDER} AND Nearest_Site_ID IS NOT NULL AND Nearest_Site_ID != '' ORDER BY Nearest_Site_ID",
+            f"SELECT DISTINCT site FROM site_focus WHERE branch = {PLACEHOLDER} AND cluster = {PLACEHOLDER} AND site IS NOT NULL AND site != '' ORDER BY site",
             (branch_name, cluster_name)
         )
-        site_ids = [row['Nearest_Site_ID'] for row in cursor.fetchall()]
+        site_ids = [row['site'] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
         conn.close()
         return site_ids
     except Exception as e:
-        logger.error(f"Error reading sites by branch {branch_name} and cluster {cluster_name}: {e}")
+        logger.error(f"Error reading sites by branch {branch_name} and cluster {cluster_name} from site_focus: {e}")
         return []
 
 def get_site_ids_by_filter(filter_col, filter_val):
+    db_col = filter_col.lower()
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            f"SELECT DISTINCT Nearest_Site_ID FROM customers WHERE {filter_col} = {PLACEHOLDER} AND Nearest_Site_ID IS NOT NULL AND Nearest_Site_ID != '' ORDER BY Nearest_Site_ID",
+            f"SELECT DISTINCT site FROM site_focus WHERE {db_col} = {PLACEHOLDER} AND site IS NOT NULL AND site != '' ORDER BY site",
             (filter_val,)
         )
-        site_ids = [row['Nearest_Site_ID'] for row in cursor.fetchall()]
+        site_ids = [row['site'] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
         conn.close()
         return site_ids
     except Exception as e:
-        logger.error(f"Error reading sites by {filter_col}: {e}")
+        logger.error(f"Error reading sites by {filter_col} from site_focus: {e}")
         return []
 
 def get_site_ids_by_branch(branch_name):
@@ -274,15 +276,17 @@ def get_site_branch_and_cluster(site_id):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            f"SELECT Branch, Cluster FROM customers WHERE Nearest_Site_ID = {PLACEHOLDER} AND Branch IS NOT NULL AND Branch != '' LIMIT 1",
+            f"SELECT branch, cluster FROM site_focus WHERE site = {PLACEHOLDER} AND branch IS NOT NULL AND branch != '' LIMIT 1",
             (site_id,)
         )
         row = cursor.fetchone()
         conn.close()
         if row:
-            return row['Branch'], row['Cluster']
+            br = row['branch'] if isinstance(row, dict) else row[0]
+            cl = row['cluster'] if isinstance(row, dict) else row[1]
+            return br, cl
     except Exception as e:
-        logger.error(f"Error getting branch/cluster for site {site_id}: {e}")
+        logger.error(f"Error getting branch/cluster for site {site_id} from site_focus: {e}")
     return '', ''
 
 def check_site_stats(site_id):

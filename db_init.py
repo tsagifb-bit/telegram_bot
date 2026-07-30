@@ -335,89 +335,86 @@ def init_db():
             print("potensi_site.csv not found, skipping import.")
             
     # 3. Initialize site_focus
-    site_focus_initialized = False
+    # Force drop and recreate to ensure updated schema with Branch and Cluster columns is applied.
     try:
-        cursor.execute("SELECT COUNT(*) AS total FROM site_focus")
-        row = cursor.fetchone()
-        if row:
-            count = row['total'] if isinstance(row, dict) else row[0]
-            if count > 0:
-                print(f"site_focus table already initialized. Found {count} entries. Skipping site_focus import.")
-                site_focus_initialized = True
+        cursor.execute("DROP TABLE IF EXISTS site_focus")
     except Exception:
         pass
 
-    if not site_focus_initialized:
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS site_focus (
-                no INT PRIMARY KEY,
-                site VARCHAR(255),
-                site_name VARCHAR(255),
-                kabupaten VARCHAR(255),
-                kecamatan VARCHAR(255),
-                latitude DOUBLE,
-                longitude DOUBLE
-            )
-        ''')
-        
-        # Create index on site
-        if DB_TYPE == 'sqlite':
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_site_focus_site ON site_focus(site)')
-        else:
-            try:
-                cursor.execute('CREATE INDEX idx_site_focus_site ON site_focus(site)')
-            except Exception:
-                pass
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS site_focus (
+            no INT PRIMARY KEY,
+            site VARCHAR(255),
+            site_name VARCHAR(255),
+            branch VARCHAR(255),
+            cluster VARCHAR(255),
+            kabupaten VARCHAR(255),
+            kecamatan VARCHAR(255),
+            latitude DOUBLE,
+            longitude DOUBLE
+        )
+    ''')
+    
+    # Create index on site
+    if DB_TYPE == 'sqlite':
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_site_focus_site ON site_focus(site)')
+    else:
+        try:
+            cursor.execute('CREATE INDEX idx_site_focus_site ON site_focus(site)')
+        except Exception:
+            pass
+            
+    # Import site_focus.csv data
+    site_focus_csv_path = 'site_focus.csv'
+    if os.path.exists(site_focus_csv_path):
+        with open(site_focus_csv_path, mode='r', encoding='utf-8-sig', errors='ignore') as f:
+            reader = csv.reader(f)
+            header = next(reader) # skip header: No,Site,Site Name,Branch,Cluster,Kabupaten,Kecamatan,Latitdue,Longitude
+            
+            insert_query = f'''
+                REPLACE INTO site_focus (
+                    no, site, site_name, branch, cluster,
+                    kabupaten, kecamatan, latitude, longitude
+                ) VALUES ({", ".join([PLACEHOLDER] * 9)})
+            '''
+            
+            rows_inserted = 0
+            for row in reader:
+                if not row or len(row) < 9:
+                    continue
                 
-        # Import site_focus.csv data
-        site_focus_csv_path = 'site_focus.csv'
-        if os.path.exists(site_focus_csv_path):
-            with open(site_focus_csv_path, mode='r', encoding='utf-8-sig', errors='ignore') as f:
-                reader = csv.reader(f)
-                header = next(reader) # skip header
+                try:
+                    no = int(row[0].strip())
+                except ValueError:
+                    continue
+                    
+                site = row[1].strip()
+                site_name = row[2].strip()
+                branch = row[3].strip()
+                cluster = row[4].strip()
+                kabupaten = row[5].strip()
+                kecamatan = row[6].strip()
                 
-                insert_query = f'''
-                    REPLACE INTO site_focus (
-                        no, site, site_name, kabupaten, kecamatan,
-                        latitude, longitude
-                    ) VALUES ({", ".join([PLACEHOLDER] * 7)})
-                '''
+                try:
+                    latitude = float(row[7].strip()) if row[7].strip() else 0.0
+                except ValueError:
+                    latitude = 0.0
+                    
+                try:
+                    longitude = float(row[8].strip()) if row[8].strip() else 0.0
+                except ValueError:
+                    longitude = 0.0
                 
-                rows_inserted = 0
-                for row in reader:
-                    if not row or len(row) < 7:
-                        continue
-                    
-                    try:
-                        no = int(row[0].strip())
-                    except ValueError:
-                        continue
-                        
-                    site = row[1].strip()
-                    site_name = row[2].strip()
-                    kabupaten = row[3].strip()
-                    kecamatan = row[4].strip()
-                    
-                    try:
-                        latitude = float(row[5].strip()) if row[5].strip() else 0.0
-                    except ValueError:
-                        latitude = 0.0
-                        
-                    try:
-                        longitude = float(row[6].strip()) if row[6].strip() else 0.0
-                    except ValueError:
-                        longitude = 0.0
-                    
-                    cursor.execute(insert_query, (
-                        no, site, site_name, kabupaten, kecamatan,
-                        latitude, longitude
-                    ))
-                    rows_inserted += 1
-                    
-            conn.commit()
-            print(f"site_focus database initialized. Imported {rows_inserted} rows.")
-        else:
-            print("site_focus.csv not found, skipping import.")
+                cursor.execute(insert_query, (
+                    no, site, site_name, branch, cluster,
+                    kabupaten, kecamatan, latitude, longitude
+                ))
+                rows_inserted += 1
+                
+        conn.commit()
+        print(f"site_focus database initialized. Imported {rows_inserted} rows.")
+    else:
+        print("site_focus.csv not found, skipping import.")
             
     conn.close()
 
