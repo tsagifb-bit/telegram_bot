@@ -1,5 +1,6 @@
 .venv/
 __pycache__/
 *.pyc
+.env
 database.db
-
+exported_*.csv

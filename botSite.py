@@ -26,120 +26,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- Database Helper Functions ---
-
-def clean_val(val):
-    if not val:
-        return val
-    return val.strip().strip('"').strip("'").strip()
-
-def get_mysql_config():
-    host = 'mysql.railway.internal'
-    port = 3306
-    user = 'root'
-    password = 'botpassword'
-    database = 'railway'
-
-    # Try to parse from URL first (common on Railway)
-    url = os.environ.get('MYSQL_URL') or os.environ.get('MYSQLURL') or os.environ.get('DATABASE_URL')
-    url = clean_val(url)
-    if url and url.lower().startswith('mysql://'):
-        try:
-            url_clean = url[8:]
-            if '@' in url_clean:
-                auth, rest = url_clean.split('@', 1)
-                if ':' in auth:
-                    user, password = auth.split(':', 1)
-                else:
-                    user = auth
-                
-                if '/' in rest:
-                    host_port, database = rest.split('/', 1)
-                else:
-                    host_port = rest
-                    database = 'botsite'
-                
-                if '?' in database:
-                    database = database.split('?', 1)[0]
-                
-                if ':' in host_port:
-                    host, port_str = host_port.split(':', 1)
-                    port = int(port_str)
-                else:
-                    host = host_port
-                    port = 3306
-                
-                host = clean_val(host)
-                user = clean_val(user)
-                password = clean_val(password)
-                database = clean_val(database)
-        except Exception as e:
-            logger.error(f"Failed to parse connection URL: {e}")
-
-    # Allow overlay with individual environment variables
-    env_host = clean_val(os.environ.get('DB_HOST') or os.environ.get('MYSQLHOST') or os.environ.get('MYSQL_HOST'))
-    if env_host:
-        host = env_host
-
-    port_val = clean_val(os.environ.get('DB_PORT') or os.environ.get('MYSQLPORT') or os.environ.get('MYSQL_PORT'))
-    if port_val:
-        try:
-            port = int(port_val)
-        except ValueError:
-            pass
-
-    env_user = clean_val(os.environ.get('DB_USER') or os.environ.get('MYSQLUSER') or os.environ.get('MYSQL_USER'))
-    if env_user:
-        user = env_user
-
-    env_password = clean_val(os.environ.get('DB_PASSWORD') or os.environ.get('MYSQLPASSWORD') or os.environ.get('MYSQL_PASSWORD'))
-    if env_password:
-        password = env_password
-
-    env_database = clean_val(os.environ.get('DB_DATABASE') or os.environ.get('MYSQLDATABASE') or os.environ.get('MYSQL_DATABASE') or os.environ.get('MYSQL_DB'))
-    if env_database:
-        database = env_database
-
-    return host, port, user, password, database
-
-# DB Type detection
-DB_TYPE = os.environ.get('DB_TYPE')
-if not DB_TYPE:
-    url = os.environ.get('MYSQL_URL') or os.environ.get('DATABASE_URL') or os.environ.get('RAILWAY_SERVICE_MYSQL_URL')
-    is_mysql_url = url and url.startswith('mysql://')
-    has_mysql_env = (
-        os.environ.get('MYSQLHOST') or 
-        os.environ.get('MYSQL_HOST') or 
-        os.environ.get('RAILWAY_SERVICE_MYSQL_URL') or
-        os.environ.get('DB_HOST') not in (None, 'localhost', '127.0.0.1')
-    )
-    if is_mysql_url or has_mysql_env:
-        DB_TYPE = 'mysql'
-    else:
-        DB_TYPE = 'sqlite'
-else:
-    DB_TYPE = DB_TYPE.lower()
-
-PLACEHOLDER = '%s' if DB_TYPE == 'mysql' else '?'
+from db import get_db_connection as _get_db_conn_raw, DB_TYPE, PLACEHOLDER
 
 def get_db_connection():
-    if DB_TYPE == 'mysql':
-        host, port, user, password, database = get_mysql_config()
-        logger.info(f"Connecting to MySQL with: host={host}, port={port}, user={user}, database={database}")
-        
-        conn = pymysql.connect(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            database=database,
-            cursorclass=pymysql.cursors.DictCursor,
-            autocommit=True
-        )
-        return conn
-    else:
-        conn = sqlite3.connect('database.db')
-        conn.row_factory = sqlite3.Row
-        return conn
+    return _get_db_conn_raw(as_dict=True)
+
 
 def get_unique_column_values(column_name):
     db_col = column_name.lower()
@@ -539,6 +430,16 @@ def get_site_coordinates(site_id):
     return None
 
 
+def make_gmaps_url(lat, lon):
+    if lat is not None and lon is not None:
+        try:
+            lat_f, lon_f = float(lat), float(lon)
+            if lat_f != 0.0 or lon_f != 0.0:
+                return f"https://www.google.com/maps?q={lat_f},{lon_f}"
+        except (ValueError, TypeError):
+            pass
+    return None
+
 # --- Keyboard Markup Helpers ---
 
 def main_menu_keyboard():
@@ -567,22 +468,28 @@ def cluster_keyboard():
 def sites_keyboard(sites, back_callback):
     return create_grid_keyboard(sites, "site_id", cols=3, back_callback=back_callback)
 
-def site_options_keyboard(site_id):
-    keyboard = [
+def site_options_keyboard(site_id, lat=None, lon=None):
+    keyboard = []
+    maps_url = make_gmaps_url(lat, lon)
+    if maps_url:
+        keyboard.append([InlineKeyboardButton("📍 Buka Lokasi Site di Google Maps", url=maps_url)])
+    keyboard.extend([
         [InlineKeyboardButton("1. 🔍 Check Potensi Surrounding", callback_data=f"site_opt:potensi:{site_id}")],
         [InlineKeyboardButton("2. ➕ Add New Potensi Surrounding", callback_data=f"site_opt:add:{site_id}")],
         [InlineKeyboardButton("3. 🔄 Kunjungan Ke Pelanggan Indihome Non Tsel", callback_data=f"site_opt:conv:{site_id}")],
         [InlineKeyboardButton("⬅️ Kembali", callback_data=f"site_opt:back")]
-    ]
+    ])
     return InlineKeyboardMarkup(keyboard)
 
-def acq_keyboard(bb_id):
-    keyboard = [
-        [
-            InlineKeyboardButton("Ya (Y)", callback_data=f"acq:Y:{bb_id}"),
-            InlineKeyboardButton("Tidak (N)", callback_data=f"acq:N:{bb_id}")
-        ]
-    ]
+def acq_keyboard(bb_id, lat=None, lon=None):
+    keyboard = []
+    maps_url = make_gmaps_url(lat, lon)
+    if maps_url:
+        keyboard.append([InlineKeyboardButton("📍 Buka Lokasi Pelanggan di Google Maps", url=maps_url)])
+    keyboard.append([
+        InlineKeyboardButton("Ya (Y)", callback_data=f"acq:Y:{bb_id}"),
+        InlineKeyboardButton("Tidak (N)", callback_data=f"acq:N:{bb_id}")
+    ])
     return InlineKeyboardMarkup(keyboard)
 
 # --- Customer Display Helpers ---
@@ -590,6 +497,10 @@ def acq_keyboard(bb_id):
 def format_customer_message(row, index, prompt):
     if not row:
         return prompt
+    lat = row.get('Latitude', '')
+    lon = row.get('Longitude', '')
+    maps_url = make_gmaps_url(lat, lon)
+    maps_str = f"[📍 Buka Peta Google Maps]({maps_url})" if maps_url else "-"
     return (
         f"No: {index + 1}\n"
         f"SITE_ID: {row.get('Nearest_Site_ID', '')}\n"
@@ -599,7 +510,8 @@ def format_customer_message(row, index, prompt):
         f"Branch: {row.get('Branch', '')}\n"
         f"Cluster: {row.get('Cluster', '')}\n"
         f"Alamat: {row.get('Alamat', '')}\n"
-        f"Kodepos: {row.get('Kodepos', '')}\n\n"
+        f"Kodepos: {row.get('Kodepos', '')}\n"
+        f"Peta Lokasi: {maps_str}\n\n"
         f"{prompt}"
     )
 
@@ -611,7 +523,8 @@ async def show_customer_for_update(update: Update, context: ContextTypes.DEFAULT
         return
     row = results[index]
     text = format_customer_message(row, index, "Apakah Pelanggan bersedia ganti kartu?")
-    await update.message.reply_text(text, reply_markup=acq_keyboard(row.get('bb_id', '')))
+    lat, lon = row.get('Latitude'), row.get('Longitude')
+    await update.message.reply_text(text, reply_markup=acq_keyboard(row.get('bb_id', ''), lat, lon), parse_mode="Markdown")
 
 async def show_customer_for_query(query, context: ContextTypes.DEFAULT_TYPE):
     results = context.user_data.get('search_results', [])
@@ -621,7 +534,8 @@ async def show_customer_for_query(query, context: ContextTypes.DEFAULT_TYPE):
         return
     row = results[index]
     text = format_customer_message(row, index, "Apakah Pelanggan bersedia ganti kartu?")
-    await query.edit_message_text(text, reply_markup=acq_keyboard(row.get('bb_id', '')))
+    lat, lon = row.get('Latitude'), row.get('Longitude')
+    await query.edit_message_text(text, reply_markup=acq_keyboard(row.get('bb_id', ''), lat, lon), parse_mode="Markdown")
 
 async def show_customer_new_message(chat_id, context: ContextTypes.DEFAULT_TYPE):
     results = context.user_data.get('search_results', [])
@@ -631,7 +545,9 @@ async def show_customer_new_message(chat_id, context: ContextTypes.DEFAULT_TYPE)
         return
     row = results[index]
     text = format_customer_message(row, index, "Apakah Pelanggan bersedia ganti kartu?")
-    await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=acq_keyboard(row.get('bb_id', '')))
+    lat, lon = row.get('Latitude'), row.get('Longitude')
+    await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=acq_keyboard(row.get('bb_id', ''), lat, lon), parse_mode="Markdown")
+
 
 # --- Bot Command and Message Handlers ---
 
@@ -679,13 +595,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if cluster:
             context.user_data['selected_cluster'] = cluster
             
+        coords = get_site_coordinates(site_id)
+        site_lat, site_lon = coords if coords else (None, None)
+        maps_url = make_gmaps_url(site_lat, site_lon)
+        maps_str = f"[📍 {site_lat},{site_lon} (Buka Google Maps)]({maps_url})" if maps_url else "-"
+            
         await update.message.reply_text(
             f"SITE ID: {site_id}\n"
             f"Branch: {branch if branch else '-'}\n"
-            f"Cluster: {cluster if cluster else '-'}\n\n"
+            f"Cluster: {cluster if cluster else '-'}\n"
+            f"Koordinat: {maps_str}\n\n"
             "Silakan pilih tindakan yang ingin dilakukan:",
-            reply_markup=site_options_keyboard(site_id)
+            reply_markup=site_options_keyboard(site_id, site_lat, site_lon),
+            parse_mode="Markdown"
         )
+
         
     elif state == 'waiting_for_perdana_numbers':
         bb_id = context.user_data.get('pending_bb_id')
@@ -982,12 +906,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if cluster:
                 context.user_data['selected_cluster'] = cluster
                 
+        coords = get_site_coordinates(site_id)
+        site_lat, site_lon = coords if coords else (None, None)
+        maps_url = make_gmaps_url(site_lat, site_lon)
+        maps_str = f"[📍 {site_lat},{site_lon} (Buka Google Maps)]({maps_url})" if maps_url else "-"
+                
         await query.edit_message_text(
             f"SITE ID: {site_id}\n"
             f"Branch: {context.user_data.get('selected_branch', '-')}\n"
-            f"Cluster: {context.user_data.get('selected_cluster', '-')}\n\n"
+            f"Cluster: {context.user_data.get('selected_cluster', '-')}\n"
+            f"Koordinat: {maps_str}\n\n"
             "Silakan pilih tindakan yang ingin dilakukan:",
-            reply_markup=site_options_keyboard(site_id)
+            reply_markup=site_options_keyboard(site_id, site_lat, site_lon),
+            parse_mode="Markdown"
         )
         
     elif data.startswith("site_opt:potensi:"):
@@ -1076,10 +1007,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for i, p in enumerate(potensi_list):
                 dist = p.get('distance_km')
                 dist_str = f"{dist} Km" if dist is not None else "-"
+                plat = p.get('latitude')
+                plon = p.get('longitude')
+                purl = make_gmaps_url(plat, plon)
+                if purl:
+                    coord_str = f"[📍 {plat},{plon} (Buka Google Maps)]({purl})"
+                else:
+                    coord_str = f"`{plat},{plon}`" if (plat or plon) else "-"
                 text += (
                     f"{i+1}. *{p.get('nama')}*\n"
                     f"   • Jarak: {dist_str}\n"
-                    f"   • Koordinat: `{p.get('latitude')},{p.get('longitude')}`\n"
+                    f"   • Koordinat: {coord_str}\n"
                 )
         else:
             text += "Tidak ada data lokasi potensi untuk kategori ini.\n"
@@ -1199,13 +1137,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("site_opt:back_to_menu:"):
         site_id = data.split(":", 2)[2]
+        coords = get_site_coordinates(site_id)
+        site_lat, site_lon = coords if coords else (None, None)
+        maps_url = make_gmaps_url(site_lat, site_lon)
+        maps_str = f"[📍 {site_lat},{site_lon} (Buka Google Maps)]({maps_url})" if maps_url else "-"
         await query.edit_message_text(
             f"SITE ID: {site_id}\n"
             f"Branch: {context.user_data.get('selected_branch', '-')}\n"
-            f"Cluster: {context.user_data.get('selected_cluster', '-')}\n\n"
+            f"Cluster: {context.user_data.get('selected_cluster', '-')}\n"
+            f"Koordinat: {maps_str}\n\n"
             "Silakan pilih tindakan yang ingin dilakukan:",
-            reply_markup=site_options_keyboard(site_id)
+            reply_markup=site_options_keyboard(site_id, site_lat, site_lon),
+            parse_mode="Markdown"
         )
+
 
     elif data == "site_opt:back":
         branch_name = context.user_data.get('selected_branch')

@@ -1,7 +1,7 @@
 import csv
 import os
 import pymysql
-from db_init import get_db_connection, DB_TYPE
+from db import get_db_connection, DB_TYPE
 
 def export_table():
     if DB_TYPE != 'mysql':
@@ -10,9 +10,9 @@ def export_table():
         
     print("Menghubungkan ke MySQL untuk mengekspor tabel...")
     try:
-        conn = get_db_connection()
-        # We can use either DictCursor or default cursor
-        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        conn = get_db_connection(as_dict=True)
+        cursor = conn.cursor()
+
         
         # Ambil struktur kolom
         cursor.execute("DESCRIBE customers")
