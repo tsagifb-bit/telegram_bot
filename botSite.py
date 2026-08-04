@@ -71,10 +71,10 @@ def get_site_ids_by_branch_and_cluster(branch_name, cluster_name):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            f"SELECT DISTINCT site FROM site_focus WHERE branch = {PLACEHOLDER} AND cluster = {PLACEHOLDER} AND site IS NOT NULL AND site != '' ORDER BY site",
+            f"SELECT DISTINCT site_id FROM site_focus WHERE branch = {PLACEHOLDER} AND cluster = {PLACEHOLDER} AND site_id IS NOT NULL AND site_id != '' ORDER BY site_id",
             (branch_name, cluster_name)
         )
-        site_ids = [row['site'] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
+        site_ids = [row['site_id'] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
         conn.close()
         return site_ids
     except Exception as e:
@@ -87,10 +87,10 @@ def get_site_ids_by_filter(filter_col, filter_val):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            f"SELECT DISTINCT site FROM site_focus WHERE {db_col} = {PLACEHOLDER} AND site IS NOT NULL AND site != '' ORDER BY site",
+            f"SELECT DISTINCT site_id FROM site_focus WHERE {db_col} = {PLACEHOLDER} AND site_id IS NOT NULL AND site_id != '' ORDER BY site_id",
             (filter_val,)
         )
-        site_ids = [row['site'] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
+        site_ids = [row['site_id'] if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
         conn.close()
         return site_ids
     except Exception as e:
@@ -108,10 +108,10 @@ def get_customers_by_site_id(site_id):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        # Hanya ambil data pelanggan yang status Acq-nya bukan 'Y'
+        # Ambil data pelanggan IndiHome Non-Telkomsel yang status Acq-nya 'N' (belum dikonversi)
         cursor.execute(
-            f"SELECT * FROM customers WHERE Nearest_Site_ID = {PLACEHOLDER} AND (Acq IS NULL OR UPPER(TRIM(Acq)) != 'Y')",
-            (site_id,)
+            f"SELECT * FROM customers WHERE UPPER(TRIM(site_id)) = {PLACEHOLDER} AND (acq IS NULL OR UPPER(TRIM(acq)) = 'N')",
+            (site_id.strip().upper(),)
         )
         customers = [dict(row) for row in cursor.fetchall()]
         conn.close()
@@ -119,55 +119,27 @@ def get_customers_by_site_id(site_id):
         logger.error(f"Error reading customers by site: {e}")
     return customers
 
+
 def update_db_acq(bb_id, acq_val):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute(f"UPDATE customers SET Acq = {PLACEHOLDER} WHERE bb_id = {PLACEHOLDER}", (acq_val, bb_id))
+    cursor.execute(f"UPDATE customers SET acq = {PLACEHOLDER} WHERE bb_id = {PLACEHOLDER}", (acq_val, bb_id))
     conn.commit()
     conn.close()
 
 def update_db_perdana(bb_id, perdana_val):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute(f"UPDATE customers SET Acq = 'Y', nomor_baru_pelanggan = {PLACEHOLDER} WHERE bb_id = {PLACEHOLDER}", (perdana_val, bb_id))
+    cursor.execute(f"UPDATE customers SET acq = 'Y', nomor_baru = {PLACEHOLDER} WHERE bb_id = {PLACEHOLDER}", (perdana_val, bb_id))
     conn.commit()
     conn.close()
-
-def check_bb_id_exists(bb_id):
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(f"SELECT COUNT(*) as total FROM customers WHERE bb_id = {PLACEHOLDER}", (bb_id,))
-        row = cursor.fetchone()
-        count = row['total'] if isinstance(row, dict) else row[0]
-        conn.close()
-        return count > 0
-    except Exception as e:
-        logger.error(f"Error checking bb_id: {e}")
-        return False
-
-def add_new_customer(bb_id, site_id, branch, cluster, nama, no_hp, alamat):
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            f"INSERT INTO customers (bb_id, Nearest_Site_ID, Branch, Cluster, Nama, No_HP, Alamat) "
-            f"VALUES ({PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER})",
-            (bb_id, site_id, branch, cluster, nama, no_hp, alamat)
-        )
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        logger.error(f"Error inserting new customer: {e}")
-        return False
 
 def get_site_branch_and_cluster(site_id):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            f"SELECT branch, cluster FROM site_focus WHERE site = {PLACEHOLDER} AND branch IS NOT NULL AND branch != '' LIMIT 1",
+            f"SELECT branch, cluster FROM site_focus WHERE site_id = {PLACEHOLDER} AND branch IS NOT NULL AND branch != '' LIMIT 1",
             (site_id,)
         )
         row = cursor.fetchone()
@@ -186,27 +158,27 @@ def check_site_stats(site_id):
         cursor = conn.cursor()
         
         # Total
-        cursor.execute(f"SELECT COUNT(*) as total FROM customers WHERE Nearest_Site_ID = {PLACEHOLDER}", (site_id,))
+        cursor.execute(f"SELECT COUNT(*) as total FROM customers WHERE site_id = {PLACEHOLDER}", (site_id,))
         r = cursor.fetchone()
         total = r['total'] if isinstance(r, dict) else r[0]
         
         # Acq = 'Y'
-        cursor.execute(f"SELECT COUNT(*) as total FROM customers WHERE Nearest_Site_ID = {PLACEHOLDER} AND UPPER(TRIM(Acq)) = 'Y'", (site_id,))
+        cursor.execute(f"SELECT COUNT(*) as total FROM customers WHERE site_id = {PLACEHOLDER} AND UPPER(TRIM(acq)) = 'Y'", (site_id,))
         r = cursor.fetchone()
         acq_y = r['total'] if isinstance(r, dict) else r[0]
         
         # Acq = 'N'
-        cursor.execute(f"SELECT COUNT(*) as total FROM customers WHERE Nearest_Site_ID = {PLACEHOLDER} AND UPPER(TRIM(Acq)) = 'N'", (site_id,))
+        cursor.execute(f"SELECT COUNT(*) as total FROM customers WHERE site_id = {PLACEHOLDER} AND UPPER(TRIM(acq)) = 'N'", (site_id,))
         r = cursor.fetchone()
         acq_n = r['total'] if isinstance(r, dict) else r[0]
         
         # Unprocessed
-        cursor.execute(f"SELECT COUNT(*) as total FROM customers WHERE Nearest_Site_ID = {PLACEHOLDER} AND (Acq IS NULL OR (UPPER(TRIM(Acq)) != 'Y' AND UPPER(TRIM(Acq)) != 'N'))", (site_id,))
+        cursor.execute(f"SELECT COUNT(*) as total FROM customers WHERE site_id = {PLACEHOLDER} AND (acq IS NULL OR (UPPER(TRIM(acq)) != 'Y' AND UPPER(TRIM(acq)) != 'N'))", (site_id,))
         r = cursor.fetchone()
         unprocessed = r['total'] if isinstance(r, dict) else r[0]
         
         # List of first 10 customers
-        cursor.execute(f"SELECT bb_id, Nama, No_HP, Acq FROM customers WHERE Nearest_Site_ID = {PLACEHOLDER} LIMIT 10", (site_id,))
+        cursor.execute(f"SELECT bb_id, nama, no_hp, acq FROM customers WHERE site_id = {PLACEHOLDER} LIMIT 10", (site_id,))
         rows = cursor.fetchall()
         customers = []
         for row in rows:
@@ -297,7 +269,7 @@ def get_potensi_by_category(branch, cluster, site_id, category):
         cursor.execute(
             f"SELECT * FROM potensi_site "
             f"WHERE branch = {PLACEHOLDER} AND cluster = {PLACEHOLDER} AND site_id = {PLACEHOLDER} AND kategori = {PLACEHOLDER} "
-            f"ORDER BY distance_km ASC",
+            f"ORDER BY distance ASC",
             (branch, cluster, site_id, category)
         )
         rows = [dict(row) for row in cursor.fetchall()]
@@ -357,7 +329,7 @@ def add_new_potensi(site_id, nama, kategori, branch, cluster, kabupaten, longitu
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            f"INSERT INTO potensi_site (no, site_id, nama, kategori, kabupaten, branch, cluster, longitude, latitude, distance_km) "
+            f"INSERT INTO potensi_site (no, site_id, nama, kategori, kabupaten, branch, cluster, long, lat, distance) "
             f"VALUES ({PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER})",
             (no, site_id, nama, kategori, kabupaten, branch, cluster, longitude, latitude, distance_km)
         )
@@ -386,24 +358,31 @@ def calculate_haversine_distance(lat1, lon1, lat2, lon2):
         return 0.0
 
 def get_site_focus_coords(site_id):
+    if not site_id:
+        return None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            f"SELECT latitude, longitude FROM site_focus WHERE site = {PLACEHOLDER} LIMIT 1",
-            (site_id,)
+            f"SELECT lat, long FROM site_focus WHERE UPPER(site_id) = {PLACEHOLDER} LIMIT 1",
+            (site_id.strip().upper(),)
         )
         row = cursor.fetchone()
         conn.close()
         if row:
-            lat = row['latitude'] if isinstance(row, dict) else row[0]
-            lon = row['longitude'] if isinstance(row, dict) else row[1]
-            return float(lat), float(lon)
+            lat = row['lat'] if isinstance(row, dict) else row[0]
+            lon = row['long'] if isinstance(row, dict) else row[1]
+            if lat is not None and lon is not None:
+                lat_f, lon_f = float(lat), float(lon)
+                if lat_f != 0.0 or lon_f != 0.0:
+                    return lat_f, lon_f
     except Exception as e:
         logger.error(f"Error getting coordinates for site {site_id} from site_focus: {e}")
     return None
 
 def get_site_coordinates(site_id):
+    if not site_id:
+        return None
     # Try site_focus table first
     coords = get_site_focus_coords(site_id)
     if coords:
@@ -414,20 +393,24 @@ def get_site_coordinates(site_id):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            f"SELECT latitude, longitude FROM potensi_site "
-            f"WHERE site_id = {PLACEHOLDER} AND latitude IS NOT NULL AND latitude != 0.0 LIMIT 1",
-            (site_id,)
+            f"SELECT lat, long FROM potensi_site "
+            f"WHERE UPPER(site_id) = {PLACEHOLDER} AND lat IS NOT NULL AND lat != 0.0 LIMIT 1",
+            (site_id.strip().upper(),)
         )
         row = cursor.fetchone()
         conn.close()
         if row:
-            lat = row['latitude'] if isinstance(row, dict) else row[0]
-            lon = row['longitude'] if isinstance(row, dict) else row[1]
-            return float(lat), float(lon)
+            lat = row['lat'] if isinstance(row, dict) else row[0]
+            lon = row['long'] if isinstance(row, dict) else row[1]
+            if lat is not None and lon is not None:
+                lat_f, lon_f = float(lat), float(lon)
+                if lat_f != 0.0 or lon_f != 0.0:
+                    return lat_f, lon_f
     except Exception as e:
         logger.error(f"Error getting coordinates for site {site_id} from potensi_site fallback: {e}")
         
     return None
+
 
 
 def make_gmaps_url(lat, lon):
@@ -494,23 +477,34 @@ def acq_keyboard(bb_id, lat=None, lon=None):
 
 # --- Customer Display Helpers ---
 
+def get_dict_val(d, *keys):
+    if not isinstance(d, dict):
+        return ''
+    for k in keys:
+        if k in d and d[k] is not None:
+            return d[k]
+        k_lower = k.lower()
+        if k_lower in d and d[k_lower] is not None:
+            return d[k_lower]
+    return ''
+
 def format_customer_message(row, index, prompt):
     if not row:
         return prompt
-    lat = row.get('Latitude', '')
-    lon = row.get('Longitude', '')
+    lat = get_dict_val(row, 'lat', 'Latitude')
+    lon = get_dict_val(row, 'long', 'Longitude')
     maps_url = make_gmaps_url(lat, lon)
     maps_str = f"[📍 Buka Peta Google Maps]({maps_url})" if maps_url else "-"
     return (
         f"No: {index + 1}\n"
-        f"SITE_ID: {row.get('Nearest_Site_ID', '')}\n"
-        f"Nomor IH: {row.get('bb_id', '')}\n"
-        f"Nomor HP: {row.get('No_HP', '')}\n"
-        f"Nama Pelanggan: {row.get('Nama', '')}\n"
-        f"Branch: {row.get('Branch', '')}\n"
-        f"Cluster: {row.get('Cluster', '')}\n"
-        f"Alamat: {row.get('Alamat', '')}\n"
-        f"Kodepos: {row.get('Kodepos', '')}\n"
+        f"SITE_ID: {get_dict_val(row, 'site_id', 'Nearest_Site_ID')}\n"
+        f"Nomor IH: {get_dict_val(row, 'bb_id')}\n"
+        f"Nomor HP: {get_dict_val(row, 'no_hp', 'No_HP')}\n"
+        f"Nama Pelanggan: {get_dict_val(row, 'nama', 'Nama')}\n"
+        f"Branch: {get_dict_val(row, 'branch', 'Branch')}\n"
+        f"Cluster: {get_dict_val(row, 'cluster', 'Cluster')}\n"
+        f"Alamat: {get_dict_val(row, 'alamat', 'Alamat')}\n"
+        f"Kodepos: {get_dict_val(row, 'kodepos', 'Kodepos')}\n"
         f"Peta Lokasi: {maps_str}\n\n"
         f"{prompt}"
     )
@@ -523,8 +517,9 @@ async def show_customer_for_update(update: Update, context: ContextTypes.DEFAULT
         return
     row = results[index]
     text = format_customer_message(row, index, "Apakah Pelanggan bersedia ganti kartu?")
-    lat, lon = row.get('Latitude'), row.get('Longitude')
-    await update.message.reply_text(text, reply_markup=acq_keyboard(row.get('bb_id', ''), lat, lon), parse_mode="Markdown")
+    lat = get_dict_val(row, 'lat', 'Latitude')
+    lon = get_dict_val(row, 'long', 'Longitude')
+    await update.message.reply_text(text, reply_markup=acq_keyboard(get_dict_val(row, 'bb_id'), lat, lon), parse_mode="Markdown")
 
 async def show_customer_for_query(query, context: ContextTypes.DEFAULT_TYPE):
     results = context.user_data.get('search_results', [])
@@ -534,8 +529,9 @@ async def show_customer_for_query(query, context: ContextTypes.DEFAULT_TYPE):
         return
     row = results[index]
     text = format_customer_message(row, index, "Apakah Pelanggan bersedia ganti kartu?")
-    lat, lon = row.get('Latitude'), row.get('Longitude')
-    await query.edit_message_text(text, reply_markup=acq_keyboard(row.get('bb_id', ''), lat, lon), parse_mode="Markdown")
+    lat = get_dict_val(row, 'lat', 'Latitude')
+    lon = get_dict_val(row, 'long', 'Longitude')
+    await query.edit_message_text(text, reply_markup=acq_keyboard(get_dict_val(row, 'bb_id'), lat, lon), parse_mode="Markdown")
 
 async def show_customer_new_message(chat_id, context: ContextTypes.DEFAULT_TYPE):
     results = context.user_data.get('search_results', [])
@@ -545,8 +541,9 @@ async def show_customer_new_message(chat_id, context: ContextTypes.DEFAULT_TYPE)
         return
     row = results[index]
     text = format_customer_message(row, index, "Apakah Pelanggan bersedia ganti kartu?")
-    lat, lon = row.get('Latitude'), row.get('Longitude')
-    await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=acq_keyboard(row.get('bb_id', ''), lat, lon), parse_mode="Markdown")
+    lat = get_dict_val(row, 'lat', 'Latitude')
+    lon = get_dict_val(row, 'long', 'Longitude')
+    await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=acq_keyboard(get_dict_val(row, 'bb_id'), lat, lon), parse_mode="Markdown")
 
 
 # --- Bot Command and Message Handlers ---
@@ -668,14 +665,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['add_potensi_nama'] = nama
         context.user_data['state'] = 'waiting_for_add_potensi_koordinat'
         
+        site_id = context.user_data.get('selected_site')
+        coords = get_site_coordinates(site_id)
+        site_gmaps = make_gmaps_url(coords[0], coords[1]) if coords else None
+        site_maps_info = f"\n💡 *Acuan Peta Site {site_id}:* [📍 Buka Google Maps Site]({site_gmaps})\n" if site_gmaps else ""
+        
         keyboard = [
             [KeyboardButton("📍 Kirim Lokasi / Pilih dari Peta", request_location=True)]
         ]
         reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
         
         await update.message.reply_text(
-            f"Nama Lokasi diterima: *{nama}*\n\n"
-            f"📍 Silakan pilih lokasi dari peta Google Maps menggunakan tombol **Kirim Lokasi / Pilih dari Peta** di bawah ini, atau ketik secara manual dengan format `latitude,longitude` (contoh: `-3.023201,108.093191`):\n\n"
+            f"Nama Lokasi diterima: *{nama}*\n"
+            f"SITE ID: *{site_id}*\n"
+            f"{site_maps_info}\n"
+            f"📍 *Cara Menentukan Lokasi Potensi di Peta:*\n\n"
+            f"1️⃣ **Pilih Titik di Peta (Rekomendasi)**:\n"
+            f"   Tekan tombol **📍 Kirim Lokasi / Pilih dari Peta** di bawah. Saat peta muncul, **geser pin/jarum peta** ke lokasi potensi yang Anda inginkan (tidak harus lokasi Anda saat ini), lalu tekan *Kirim Lokasi Ini*.\n\n"
+            f"2️⃣ **Ketik Koordinat Desimal dari Google Maps**:\n"
+            f"   Buka Google Maps, tahan/klik titik lokasi potensi untuk menyalin koordinat, lalu ketik di sini dalam format `latitude,longitude`\n"
+            f"   *(Contoh: `-3.023201,108.093191`)*\n\n"
             f"(Ketik 'batal' untuk membatalkan)",
             reply_markup=reply_markup,
             parse_mode="Markdown"
@@ -694,15 +703,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 longitude = float(parts[1])
             except (ValueError, IndexError):
                 await update.message.reply_text(
-                    "⚠️ Format koordinat tidak valid. Silakan kirim lokasi menggunakan fitur **Kirim Lokasi** di Telegram "
-                    "atau ketik manual dengan format `latitude,longitude` desimal (contoh: `-3.023201,108.093191`):"
+                    "⚠️ Format koordinat tidak valid.\n\n"
+                    "Silakan tekan tombol **📍 Kirim Lokasi / Pilih dari Peta** lalu **geser pin lokasi pada peta** ke titik yang Anda pilih, "
+                    "atau ketik manual format desimal `latitude,longitude` (contoh: `-3.023201,108.093191`):",
+                    parse_mode="Markdown"
                 )
                 return
         else:
             await update.message.reply_text(
-                "⚠️ Mohon kirim lokasi atau masukkan koordinat dalam format `latitude,longitude`:"
+                "⚠️ Mohon kirim lokasi via peta atau masukkan koordinat `latitude,longitude`:",
+                parse_mode="Markdown"
             )
             return
+
 
         context.user_data['add_potensi_lat'] = latitude
         context.user_data['add_potensi_long'] = longitude
@@ -1005,17 +1018,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if potensi_list:
             for i, p in enumerate(potensi_list):
-                dist = p.get('distance_km')
-                dist_str = f"{dist} Km" if dist is not None else "-"
-                plat = p.get('latitude')
-                plon = p.get('longitude')
+                dist = get_dict_val(p, 'distance', 'distance_km')
+                dist_str = f"{dist} Km" if dist != '' and dist is not None else "-"
+                plat = get_dict_val(p, 'lat', 'latitude')
+                plon = get_dict_val(p, 'long', 'longitude')
                 purl = make_gmaps_url(plat, plon)
                 if purl:
                     coord_str = f"[📍 {plat},{plon} (Buka Google Maps)]({purl})"
                 else:
                     coord_str = f"`{plat},{plon}`" if (plat or plon) else "-"
                 text += (
-                    f"{i+1}. *{p.get('nama')}*\n"
+                    f"{i+1}. *{get_dict_val(p, 'nama')}*\n"
                     f"   • Jarak: {dist_str}\n"
                     f"   • Koordinat: {coord_str}\n"
                 )
@@ -1126,7 +1139,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("⬅️ Kembali", callback_data=f"site_opt:back_to_menu:{site_id}")]
             ])
             await query.edit_message_text(
-                f"Tidak ada data pelanggan yang belum disetujui (Y) untuk SITE ID {site_id}.",
+                f"Tidak ada data pelanggan yang perlu dikunjungi (Acq = 'N') untuk SITE ID {site_id}.",
                 reply_markup=keyboard
             )
         else:

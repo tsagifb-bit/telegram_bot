@@ -30,6 +30,11 @@ def init_db():
     force_reinit = os.environ.get('FORCE_REINIT_DB') == '1'
     
     # 1. Initialize customers
+    if force_reinit:
+        try:
+            cursor.execute("DROP TABLE IF EXISTS customers")
+        except Exception:
+            pass
     cust_count = is_table_populated(cursor, 'customers')
     if cust_count > 0 and not force_reinit:
         print(f"customers table already initialized. Found {cust_count} entries. Skipping CSV import to preserve user updates.", flush=True)
@@ -37,33 +42,33 @@ def init_db():
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS customers (
                 bb_id VARCHAR(255) PRIMARY KEY,
-                Latitude VARCHAR(255),
-                Longitude VARCHAR(255),
-                Nearest_Site_ID VARCHAR(255),
-                Distance_km DOUBLE,
-                Branch VARCHAR(255),
-                Cluster VARCHAR(255),
-                Cat VARCHAR(255),
-                Focus VARCHAR(255),
-                Opt VARCHAR(255),
-                Opt2 VARCHAR(255),
-                Cat_Site VARCHAR(255),
-                Nama VARCHAR(255),
-                No_HP VARCHAR(255),
-                Alamat TEXT,
-                Kodepos VARCHAR(20),
-                Acq VARCHAR(10),
-                nomor_baru_pelanggan VARCHAR(255)
+                lat VARCHAR(255),
+                long VARCHAR(255),
+                site_id VARCHAR(255),
+                distance DOUBLE,
+                branch VARCHAR(255),
+                cluster VARCHAR(255),
+                cat VARCHAR(255),
+                focus VARCHAR(255),
+                opt_location VARCHAR(255),
+                opt_name VARCHAR(255),
+                cat_site VARCHAR(255),
+                nama VARCHAR(255),
+                no_hp VARCHAR(255),
+                alamat TEXT,
+                kodepos VARCHAR(20),
+                acq VARCHAR(10),
+                nomor_baru VARCHAR(255)
             )
         ''')
         
         # Create indexes for optimization
         if DB_TYPE == 'sqlite':
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_site_id ON customers(Nearest_Site_ID)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_branch ON customers(Branch)')
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_cluster ON customers(Cluster)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_site_id ON customers(site_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_branch ON customers(branch)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_cluster ON customers(cluster)')
         else:
-            for idx_name, col in [('idx_site_id', 'Nearest_Site_ID'), ('idx_branch', 'Branch'), ('idx_cluster', 'Cluster')]:
+            for idx_name, col in [('idx_site_id', 'site_id'), ('idx_branch', 'branch'), ('idx_cluster', 'cluster')]:
                 try:
                     cursor.execute(f'CREATE INDEX {idx_name} ON customers({col})')
                 except Exception:
@@ -77,10 +82,10 @@ def init_db():
                 
                 insert_query = f'''
                     REPLACE INTO customers (
-                        bb_id, Latitude, Longitude, Nearest_Site_ID, Distance_km,
-                        Branch, Cluster, Cat, Focus, Opt, Opt2, Cat_Site,
-                        Nama, No_HP, Alamat, Kodepos, Acq
-                    ) VALUES ({", ".join([PLACEHOLDER] * 17)})
+                        bb_id, lat, long, site_id, distance,
+                        branch, cluster, cat, focus, opt_location, opt_name, cat_site,
+                        nama, no_hp, alamat, kodepos, acq, nomor_baru
+                    ) VALUES ({", ".join([PLACEHOLDER] * 18)})
                 '''
                 
                 rows_inserted = 0
@@ -111,11 +116,12 @@ def init_db():
                     alamat = row[15].strip() if len(row) > 15 else ''
                     kodepos = row[16].strip() if len(row) > 16 else ''
                     acq = row[17].strip() if len(row) > 17 else ''
+                    nomor_baru = row[18].strip() if len(row) > 18 else ''
                     
                     cursor.execute(insert_query, (
                         bb_id, latitude, longitude, nearest_site_id, distance_km,
                         branch, cluster, cat, focus, opt, opt2, cat_site,
-                        nama, no_hp, alamat, kodepos, acq
+                        nama, no_hp, alamat, kodepos, acq, nomor_baru
                     ))
                     rows_inserted += 1
                     
@@ -123,6 +129,11 @@ def init_db():
             print(f"Customers database initialized. Imported {rows_inserted} rows.", flush=True)
 
     # 2. Initialize potensi_site
+    if force_reinit:
+        try:
+            cursor.execute("DROP TABLE IF EXISTS potensi_site")
+        except Exception:
+            pass
     pot_count = is_table_populated(cursor, 'potensi_site')
     if pot_count > 0 and not force_reinit:
         print(f"potensi_site table already initialized. Found {pot_count} entries. Skipping CSV import to preserve user updates.", flush=True)
@@ -136,9 +147,9 @@ def init_db():
                 kabupaten VARCHAR(255),
                 branch VARCHAR(255),
                 cluster VARCHAR(255),
-                longitude DOUBLE,
-                latitude DOUBLE,
-                distance_km DOUBLE
+                long DOUBLE,
+                lat DOUBLE,
+                distance DOUBLE
             )
         ''')
         
@@ -161,7 +172,7 @@ def init_db():
                 insert_query = f'''
                     REPLACE INTO potensi_site (
                         no, site_id, nama, kategori, kabupaten,
-                        branch, cluster, longitude, latitude, distance_km
+                        branch, cluster, long, lat, distance
                     ) VALUES ({", ".join([PLACEHOLDER] * 10)})
                 '''
                 
@@ -209,6 +220,11 @@ def init_db():
             print("potensi_site.csv not found, skipping import.", flush=True)
 
     # 3. Initialize site_focus
+    if force_reinit:
+        try:
+            cursor.execute("DROP TABLE IF EXISTS site_focus")
+        except Exception:
+            pass
     focus_count = is_table_populated(cursor, 'site_focus')
     if focus_count > 0 and not force_reinit:
         print(f"site_focus table already initialized. Found {focus_count} entries. Skipping CSV import.", flush=True)
@@ -216,23 +232,23 @@ def init_db():
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS site_focus (
                 no INT PRIMARY KEY,
-                site VARCHAR(255),
+                site_id VARCHAR(255),
                 site_name VARCHAR(255),
                 branch VARCHAR(255),
                 cluster VARCHAR(255),
                 kabupaten VARCHAR(255),
                 kecamatan VARCHAR(255),
-                latitude DOUBLE,
-                longitude DOUBLE
+                lat DOUBLE,
+                long DOUBLE
             )
         ''')
         
-        # Create index on site
+        # Create index on site_id
         if DB_TYPE == 'sqlite':
-            cursor.execute('CREATE INDEX IF NOT EXISTS idx_site_focus_site ON site_focus(site)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_site_focus_site ON site_focus(site_id)')
         else:
             try:
-                cursor.execute('CREATE INDEX idx_site_focus_site ON site_focus(site)')
+                cursor.execute('CREATE INDEX idx_site_focus_site ON site_focus(site_id)')
             except Exception:
                 pass
                 
@@ -245,8 +261,8 @@ def init_db():
                 
                 insert_query = f'''
                     REPLACE INTO site_focus (
-                        no, site, site_name, branch, cluster,
-                        kabupaten, kecamatan, latitude, longitude
+                        no, site_id, site_name, branch, cluster,
+                        kabupaten, kecamatan, lat, long
                     ) VALUES ({", ".join([PLACEHOLDER] * 9)})
                 '''
                 
@@ -260,7 +276,7 @@ def init_db():
                     except ValueError:
                         continue
                         
-                    site = row[1].strip()
+                    site_id = row[1].strip()
                     site_name = row[2].strip()
                     branch = row[3].strip()
                     cluster = row[4].strip()
@@ -278,7 +294,7 @@ def init_db():
                         longitude = 0.0
                     
                     cursor.execute(insert_query, (
-                        no, site, site_name, branch, cluster,
+                        no, site_id, site_name, branch, cluster,
                         kabupaten, kecamatan, latitude, longitude
                     ))
                     rows_inserted += 1
