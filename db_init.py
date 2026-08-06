@@ -110,14 +110,13 @@ def init_db():
                     focus = row[8].strip()
                     opt = row[9].strip()
                     opt2 = row[10].strip() if len(row) > 10 else ''
-                    cat_site = row[12].strip() if len(row) > 12 else ''
-                    nama = row[13].strip() if len(row) > 13 else ''
-                    no_hp = row[14].strip() if len(row) > 14 else ''
-                    alamat = row[15].strip() if len(row) > 15 else ''
-                    kodepos = row[16].strip() if len(row) > 16 else ''
-                    acq = row[17].strip() if len(row) > 17 else ''
-                    nomor_baru = row[18].strip() if len(row) > 18 else ''
-                    
+                    cat_site = row[11].strip() if len(row) > 11 else ''
+                    nama = row[12].strip() if len(row) > 12 else ''
+                    no_hp = row[13].strip() if len(row) > 13 else ''
+                    alamat = row[14].strip() if len(row) > 14 else ''
+                    kodepos = row[15].strip() if len(row) > 15 else ''
+                    acq = row[16].strip() if len(row) > 16 else ''
+                    nomor_baru = row[17].strip() if len(row) > 17 else ''
                     cursor.execute(insert_query, (
                         bb_id, latitude, longitude, nearest_site_id, distance_km,
                         branch, cluster, cat, focus, opt, opt2, cat_site,

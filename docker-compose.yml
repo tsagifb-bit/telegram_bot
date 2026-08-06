@@ -1,42 +1,19 @@
 services:
-  db:
-    image: mysql:8.0
-    container_name: botsite-mysql
-    restart: always
-    env_file:
-      - .env
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${DB_DATABASE:-botsite}
-      MYSQL_USER: ${DB_USER:-botuser}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
-    ports:
-      - "0.0.0.0:${DB_PORT:-3306}:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "${DB_USER:-botuser}", "-p${DB_PASSWORD}"]
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-
   bot:
     build: .
     container_name: botsite-bot
     restart: always
-    depends_on:
-      db:
-        condition: service_healthy
     env_file:
       - .env
     environment:
       - DB_TYPE=${DB_TYPE:-mysql}
-      - DB_HOST=db
-      - DB_PORT=3306
-      - DB_USER=${DB_USER:-botuser}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
-      - DB_DATABASE=${DB_DATABASE:-botsite}
+      - DB_DATABASE=${DB_DATABASE}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - FORCE_REINIT_DB=${FORCE_REINIT_DB:-1}
     command: sh -c "python db_init.py && python botSite.py"
 
 volumes:
