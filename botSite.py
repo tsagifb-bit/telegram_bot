@@ -120,17 +120,17 @@ def get_customers_by_site_id(site_id):
     return customers
 
 
-def update_db_acq(bb_id, acq_val):
+def update_db_acq(cust_id, acq_val):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute(f"UPDATE customers SET acq = {PLACEHOLDER} WHERE bb_id = {PLACEHOLDER}", (acq_val, bb_id))
+    cursor.execute(f"UPDATE customers SET acq = {PLACEHOLDER} WHERE id = {PLACEHOLDER} OR bb_id = {PLACEHOLDER}", (acq_val, cust_id, cust_id))
     conn.commit()
     conn.close()
 
-def update_db_perdana(bb_id, perdana_val):
+def update_db_perdana(cust_id, perdana_val):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute(f"UPDATE customers SET acq = 'Y', nomor_baru = {PLACEHOLDER} WHERE bb_id = {PLACEHOLDER}", (perdana_val, bb_id))
+    cursor.execute(f"UPDATE customers SET acq = 'Y', nomor_baru = {PLACEHOLDER} WHERE id = {PLACEHOLDER} OR bb_id = {PLACEHOLDER}", (perdana_val, cust_id, cust_id))
     conn.commit()
     conn.close()
 
@@ -329,7 +329,7 @@ def add_new_potensi(site_id, nama, kategori, branch, cluster, kabupaten, longitu
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            f"INSERT INTO potensi_site (no, site_id, nama, kategori, kabupaten, branch, cluster, long, lat, distance) "
+            f"INSERT INTO potensi_site (no, site_id, nama, kategori, kabupaten, branch, cluster, `long`, lat, distance) "
             f"VALUES ({PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER}, {PLACEHOLDER})",
             (no, site_id, nama, kategori, kabupaten, branch, cluster, longitude, latitude, distance_km)
         )
@@ -364,7 +364,7 @@ def get_site_focus_coords(site_id):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            f"SELECT lat, long FROM site_focus WHERE UPPER(site_id) = {PLACEHOLDER} LIMIT 1",
+            f"SELECT lat, `long` FROM site_focus WHERE UPPER(site_id) = {PLACEHOLDER} LIMIT 1",
             (site_id.strip().upper(),)
         )
         row = cursor.fetchone()
@@ -393,7 +393,7 @@ def get_site_coordinates(site_id):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            f"SELECT lat, long FROM potensi_site "
+            f"SELECT lat, `long` FROM potensi_site "
             f"WHERE UPPER(site_id) = {PLACEHOLDER} AND lat IS NOT NULL AND lat != 0.0 LIMIT 1",
             (site_id.strip().upper(),)
         )
@@ -464,14 +464,14 @@ def site_options_keyboard(site_id, lat=None, lon=None):
     ])
     return InlineKeyboardMarkup(keyboard)
 
-def acq_keyboard(bb_id, lat=None, lon=None):
+def acq_keyboard(cust_id, lat=None, lon=None):
     keyboard = []
     maps_url = make_gmaps_url(lat, lon)
     if maps_url:
         keyboard.append([InlineKeyboardButton("📍 Buka Lokasi Pelanggan di Google Maps", url=maps_url)])
     keyboard.append([
-        InlineKeyboardButton("Ya (Y)", callback_data=f"acq:Y:{bb_id}"),
-        InlineKeyboardButton("Tidak (N)", callback_data=f"acq:N:{bb_id}")
+        InlineKeyboardButton("Ya (Y)", callback_data=f"acq:Y:{cust_id}"),
+        InlineKeyboardButton("Tidak (N)", callback_data=f"acq:N:{cust_id}")
     ])
     return InlineKeyboardMarkup(keyboard)
 
@@ -519,7 +519,7 @@ async def show_customer_for_update(update: Update, context: ContextTypes.DEFAULT
     text = format_customer_message(row, index, "Apakah Pelanggan bersedia ganti kartu?")
     lat = get_dict_val(row, 'lat', 'Latitude')
     lon = get_dict_val(row, 'long', 'Longitude')
-    await update.message.reply_text(text, reply_markup=acq_keyboard(get_dict_val(row, 'bb_id'), lat, lon), parse_mode="Markdown")
+    await update.message.reply_text(text, reply_markup=acq_keyboard(get_dict_val(row, 'id', 'bb_id'), lat, lon), parse_mode="Markdown")
 
 async def show_customer_for_query(query, context: ContextTypes.DEFAULT_TYPE):
     results = context.user_data.get('search_results', [])
@@ -531,7 +531,7 @@ async def show_customer_for_query(query, context: ContextTypes.DEFAULT_TYPE):
     text = format_customer_message(row, index, "Apakah Pelanggan bersedia ganti kartu?")
     lat = get_dict_val(row, 'lat', 'Latitude')
     lon = get_dict_val(row, 'long', 'Longitude')
-    await query.edit_message_text(text, reply_markup=acq_keyboard(get_dict_val(row, 'bb_id'), lat, lon), parse_mode="Markdown")
+    await query.edit_message_text(text, reply_markup=acq_keyboard(get_dict_val(row, 'id', 'bb_id'), lat, lon), parse_mode="Markdown")
 
 async def show_customer_new_message(chat_id, context: ContextTypes.DEFAULT_TYPE):
     results = context.user_data.get('search_results', [])
@@ -543,7 +543,7 @@ async def show_customer_new_message(chat_id, context: ContextTypes.DEFAULT_TYPE)
     text = format_customer_message(row, index, "Apakah Pelanggan bersedia ganti kartu?")
     lat = get_dict_val(row, 'lat', 'Latitude')
     lon = get_dict_val(row, 'long', 'Longitude')
-    await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=acq_keyboard(get_dict_val(row, 'bb_id'), lat, lon), parse_mode="Markdown")
+    await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=acq_keyboard(get_dict_val(row, 'id', 'bb_id'), lat, lon), parse_mode="Markdown")
 
 
 # --- Bot Command and Message Handlers ---
@@ -1180,19 +1180,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("Silakan ketik SITE ID yang ingin Anda cari (Contoh: SLT077):")
             
     elif data.startswith("acq:"):
-        _, answer, bb_id = data.split(":", 2)
+        _, answer, cust_id = data.split(":", 2)
         
         results = context.user_data.get('search_results', [])
         index = context.user_data.get('current_index', 0)
         
-        if results and index < len(results) and results[index].get('bb_id') == bb_id:
+        if results and index < len(results) and str(get_dict_val(results[index], 'id', 'bb_id')) == str(cust_id):
             row = results[index]
         else:
             row = None
             
         if answer == 'Y':
             context.user_data['state'] = 'waiting_for_perdana_numbers'
-            context.user_data['pending_bb_id'] = bb_id
+            context.user_data['pending_bb_id'] = cust_id
             prompt = "Silahkan menginput Nomor Perdana Utama :)"
             details_text = format_customer_message(row, index, prompt)
             await query.edit_message_text(text=details_text)
@@ -1200,7 +1200,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:  # answer == 'N'
             # Simpan N ke Database
             try:
-                update_db_acq(bb_id, 'N')
+                update_db_acq(cust_id, 'N')
             except Exception as e:
                 logger.error(f"Error saving N to database: {e}")
                 await context.bot.send_message(

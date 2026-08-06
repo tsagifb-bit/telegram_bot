@@ -7,13 +7,17 @@ logger = logging.getLogger(__name__)
 
 def is_table_populated(cursor, table_name):
     try:
-        cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+        if DB_TYPE == 'mysql':
+            cursor.execute("SHOW TABLES LIKE %s", (table_name,))
+            if not cursor.fetchone():
+                return 0
+        cursor.execute(f"SELECT COUNT(*) FROM `{table_name}`")
         row = cursor.fetchone()
         if row:
             count = row[0]
             return count if count > 0 else 0
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Error checking table {table_name}: {e}")
     return 0
 
 def init_db():
@@ -33,6 +37,7 @@ def init_db():
     if force_reinit:
         try:
             cursor.execute("DROP TABLE IF EXISTS customers")
+            conn.commit()
         except Exception:
             pass
     cust_count = is_table_populated(cursor, 'customers')
@@ -41,9 +46,10 @@ def init_db():
     else:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS customers (
-                bb_id VARCHAR(255) PRIMARY KEY,
+                id INT PRIMARY KEY,
+                bb_id VARCHAR(255),
                 lat VARCHAR(255),
-                long VARCHAR(255),
+                `long` VARCHAR(255),
                 site_id VARCHAR(255),
                 distance DOUBLE,
                 branch VARCHAR(255),
@@ -82,10 +88,10 @@ def init_db():
                 
                 insert_query = f'''
                     REPLACE INTO customers (
-                        bb_id, lat, long, site_id, distance,
+                        id, bb_id, lat, `long`, site_id, distance,
                         branch, cluster, cat, focus, opt_location, opt_name, cat_site,
                         nama, no_hp, alamat, kodepos, acq, nomor_baru
-                    ) VALUES ({", ".join([PLACEHOLDER] * 18)})
+                    ) VALUES ({", ".join([PLACEHOLDER] * 19)})
                 '''
                 
                 rows_inserted = 0
@@ -117,12 +123,13 @@ def init_db():
                     kodepos = row[15].strip() if len(row) > 15 else ''
                     acq = row[16].strip() if len(row) > 16 else ''
                     nomor_baru = row[17].strip() if len(row) > 17 else ''
+                    rows_inserted += 1
                     cursor.execute(insert_query, (
-                        bb_id, latitude, longitude, nearest_site_id, distance_km,
+                        rows_inserted, bb_id, latitude, longitude, nearest_site_id, distance_km,
                         branch, cluster, cat, focus, opt, opt2, cat_site,
                         nama, no_hp, alamat, kodepos, acq, nomor_baru
                     ))
-                    rows_inserted += 1
+                    
                     
             conn.commit()
             print(f"Customers database initialized. Imported {rows_inserted} rows.", flush=True)
@@ -131,6 +138,7 @@ def init_db():
     if force_reinit:
         try:
             cursor.execute("DROP TABLE IF EXISTS potensi_site")
+            conn.commit()
         except Exception:
             pass
     pot_count = is_table_populated(cursor, 'potensi_site')
@@ -146,7 +154,7 @@ def init_db():
                 kabupaten VARCHAR(255),
                 branch VARCHAR(255),
                 cluster VARCHAR(255),
-                long DOUBLE,
+                `long` DOUBLE,
                 lat DOUBLE,
                 distance DOUBLE
             )
@@ -171,7 +179,7 @@ def init_db():
                 insert_query = f'''
                     REPLACE INTO potensi_site (
                         no, site_id, nama, kategori, kabupaten,
-                        branch, cluster, long, lat, distance
+                        branch, cluster, `long`, lat, distance
                     ) VALUES ({", ".join([PLACEHOLDER] * 10)})
                 '''
                 
@@ -222,6 +230,7 @@ def init_db():
     if force_reinit:
         try:
             cursor.execute("DROP TABLE IF EXISTS site_focus")
+            conn.commit()
         except Exception:
             pass
     focus_count = is_table_populated(cursor, 'site_focus')
@@ -238,7 +247,7 @@ def init_db():
                 kabupaten VARCHAR(255),
                 kecamatan VARCHAR(255),
                 lat DOUBLE,
-                long DOUBLE
+                `long` DOUBLE
             )
         ''')
         
@@ -261,7 +270,7 @@ def init_db():
                 insert_query = f'''
                     REPLACE INTO site_focus (
                         no, site_id, site_name, branch, cluster,
-                        kabupaten, kecamatan, lat, long
+                        kabupaten, kecamatan, lat, `long`
                     ) VALUES ({", ".join([PLACEHOLDER] * 9)})
                 '''
                 

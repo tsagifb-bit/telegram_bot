@@ -13,7 +13,7 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_DATABASE=${DB_DATABASE}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
-      - FORCE_REINIT_DB=${FORCE_REINIT_DB:-1}
+      - FORCE_REINIT_DB=${FORCE_REINIT_DB:-0}
     command: sh -c "python db_init.py && python botSite.py"
 
 volumes:
